@@ -41,4 +41,4 @@ publicDir = "dist"
 [userenv]
 
 [userenv.shared]
-VITE_BACKEND_URL = "https://xh9c4sz2-8000.uks1.devtunnels.ms/api"
+VITE_BACKEND_URL = "/api"

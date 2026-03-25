@@ -408,22 +408,31 @@ class BackendApi {
     await this.api.delete(`/chats/${chatId}`);
   }
 
+  private resolveAbsoluteBase(): string {
+    if (this.baseURL.startsWith("http://") || this.baseURL.startsWith("https://")) {
+      return this.baseURL;
+    }
+    return `${window.location.origin}${this.baseURL}`;
+  }
+
   getChatRealtimeSocketUrl(): string {
     const accessToken = this.getStoredAccessToken();
     if (!accessToken) {
       throw new Error("You need to sign in first.");
     }
 
-    const base = this.baseURL.endsWith("/") ? this.baseURL : `${this.baseURL}/`;
-    const url = new URL("chats/ws", base);
+    const base = this.resolveAbsoluteBase();
+    const normalizedBase = base.endsWith("/") ? base : `${base}/`;
+    const url = new URL("chats/ws", normalizedBase);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     url.searchParams.set("token", accessToken);
     return url.toString();
   }
 
   private getChatStreamURL(): string {
-    const base = this.baseURL.endsWith("/") ? this.baseURL : `${this.baseURL}/`;
-    return new URL("chats/", base).toString();
+    const base = this.resolveAbsoluteBase();
+    const normalizedBase = base.endsWith("/") ? base : `${base}/`;
+    return new URL("chats/", normalizedBase).toString();
   }
 
   private async postChatStream(
