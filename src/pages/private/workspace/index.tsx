@@ -180,6 +180,11 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
   const [confirmingFileId, setConfirmingFileId] = useState<string | null>(null);
   const [deletingFileId, setDeletingFileId] = useState<string | null>(null);
   const [showNewProject, setShowNewProject] = useState(false);
+  const [memoryType, setMemoryType] = useState<"default" | "project-only">("default");
+  const [memoryExpanded, setMemoryExpanded] = useState(false);
+  const [createShareEmail, setCreateShareEmail] = useState("");
+  const [createInvites, setCreateInvites] = useState<Array<{ email: string; permission: SharePermission }>>([]);
+  const [sendingCreateInvite, setSendingCreateInvite] = useState(false);
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [chats, setChats] = useState<ChatWithMessages[]>([]);
@@ -524,11 +529,26 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
         name,
         description: projectDescriptionInput.trim() || undefined,
       });
+      // Send any pending share invites
+      for (const invite of createInvites) {
+        try {
+          await backendApi.shareProject(project.id, {
+            user_email: invite.email,
+            permission: invite.permission,
+          });
+        } catch {
+          // non-fatal
+        }
+      }
       setProjects((prev) => [project, ...prev]);
       setProjectFilter(project.id);
       navigateToPanel("project");
       setProjectNameInput("");
       setProjectDescriptionInput("");
+      setCreateShareEmail("");
+      setCreateInvites([]);
+      setMemoryType("default");
+      setMemoryExpanded(false);
       setShowNewProject(false);
       toast.success("Project created.");
     } catch (error) {
@@ -536,6 +556,18 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
     } finally {
       setCreatingProject(false);
     }
+  }
+
+  function handleAddCreateInvite() {
+    const email = createShareEmail.trim();
+    if (!email) return;
+    if (createInvites.some((i) => i.email === email)) return;
+    setCreateInvites((prev) => [...prev, { email, permission: "viewer" }]);
+    setCreateShareEmail("");
+  }
+
+  function handleRemoveCreateInvite(email: string) {
+    setCreateInvites((prev) => prev.filter((i) => i.email !== email));
   }
 
   async function handleSaveProject(event: FormEvent<HTMLFormElement>) {
@@ -1168,8 +1200,202 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
 
         {/* ── Main content ── */}
         <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
+
+          {/* ── Create Project full-page form ── */}
+          {showNewProject && (
+            <div className="flex-1 overflow-y-auto">
+              <form
+                onSubmit={handleCreateProject}
+                className="mx-auto max-w-2xl px-8 py-10"
+              >
+                <h1 className="mb-8 text-3xl font-bold text-gray-900">Create Project</h1>
+
+                {/* Info card */}
+                <div className="mb-8 rounded-xl border border-gray-200 bg-gray-50 p-5">
+                  <p className="mb-2 text-sm font-semibold text-gray-800">How to use your project</p>
+                  <p className="text-sm leading-relaxed text-gray-500">
+                    Your project will help you stay organized and keep track of your progress across
+                    different tasks. Upload notes, documents, designs, or code to build a structured
+                    collection that you can reference anytime. Start by giving your project a clear
+                    and memorable name, and describe your main goals, ideas, or challenges. You'll
+                    always be able to update it later as your work evolves.
+                  </p>
+                </div>
+
+                {/* Project name */}
+                <div className="mb-6">
+                  <label className="mb-2 block text-sm font-semibold text-gray-800">
+                    What are you project name
+                  </label>
+                  <input
+                    type="text"
+                    value={projectNameInput}
+                    onChange={(e) => setProjectNameInput(e.target.value)}
+                    placeholder="Name your project"
+                    required
+                    className="w-full rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-800 placeholder:text-gray-400 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-50 transition-all"
+                  />
+                </div>
+
+                {/* Memory */}
+                <div className="mb-6">
+                  <label className="mb-2 block text-sm font-semibold text-gray-800">Memory</label>
+                  <div className="rounded-xl border border-gray-200 overflow-hidden">
+                    {/* Collapsed header */}
+                    <button
+                      type="button"
+                      onClick={() => setMemoryExpanded((v) => !v)}
+                      className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium text-gray-800 bg-white hover:bg-gray-50 transition-colors"
+                    >
+                      <span>{memoryType === "default" ? "Default" : "Project-only"}</span>
+                      {memoryExpanded ? (
+                        <ChevronRight className="h-4 w-4 -rotate-90 text-gray-400 transition-transform" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4 rotate-90 text-gray-400 transition-transform" />
+                      )}
+                    </button>
+                    {/* Expanded options */}
+                    {memoryExpanded && (
+                      <div className="border-t border-gray-200">
+                        <button
+                          type="button"
+                          onClick={() => { setMemoryType("default"); setMemoryExpanded(false); }}
+                          className={`w-full px-4 py-3 text-left transition-colors ${memoryType === "default" ? "bg-gray-50" : "bg-white hover:bg-gray-50"}`}
+                        >
+                          <p className="text-sm font-medium text-gray-800">Default</p>
+                          <p className="text-xs text-gray-500 mt-0.5">Project can access memories from outside chats</p>
+                        </button>
+                        <div className="h-px bg-gray-100 mx-4" />
+                        <button
+                          type="button"
+                          onClick={() => { setMemoryType("project-only"); setMemoryExpanded(false); }}
+                          className={`w-full px-4 py-3 text-left transition-colors ${memoryType === "project-only" ? "bg-gray-50" : "bg-white hover:bg-gray-50"}`}
+                        >
+                          <p className="text-sm font-medium text-gray-800">Project-only</p>
+                          <p className="text-xs text-gray-500 mt-0.5">Project can only access its own memories. Its memories are hidden from outside chats</p>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Add project chips (linked projects) */}
+                  {!memoryExpanded && (
+                    <div className="mt-3">
+                      <p className="mb-2 text-xs font-medium text-gray-600">Add project</p>
+                      <div className="flex flex-wrap gap-2">
+                        {projects
+                          .filter((p) => p.name !== projectNameInput.trim())
+                          .slice(0, 6)
+                          .map((p) => (
+                            <span
+                              key={p.id}
+                              className="flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3 py-1 text-xs text-gray-600"
+                            >
+                              <FolderOpen className="h-3 w-3 text-gray-400" />
+                              {p.name}
+                            </span>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Share to select */}
+                <div className="mb-6">
+                  <label className="mb-2 block text-sm font-semibold text-gray-800">
+                    Share to select
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="email"
+                      value={createShareEmail}
+                      onChange={(e) => setCreateShareEmail(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") { e.preventDefault(); handleAddCreateInvite(); }
+                      }}
+                      placeholder="Email"
+                      className="flex-1 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-800 placeholder:text-gray-400 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-50 transition-all"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddCreateInvite}
+                      disabled={!createShareEmail.trim()}
+                      className="rounded-lg bg-blue-500 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-600 disabled:opacity-40 transition-colors"
+                    >
+                      Invite
+                    </button>
+                  </div>
+                  {/* Pending invites */}
+                  {createInvites.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      {createInvites.map((inv) => (
+                        <div key={inv.email} className="flex items-center gap-3 rounded-lg border border-gray-100 bg-gray-50 px-4 py-2">
+                          <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-gray-200 text-[10px] font-semibold text-gray-600">
+                            {inv.email[0]?.toUpperCase()}
+                          </div>
+                          <span className="flex-1 text-sm text-gray-500">{inv.email} (invite sent)</span>
+                          <span className="flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2.5 py-0.5 text-[11px] font-medium text-gray-600">
+                            Viewer
+                            <ChevronRight className="h-3 w-3 rotate-90 text-gray-400" />
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveCreateInvite(inv.email)}
+                            className="text-gray-400 hover:text-red-500 transition-colors"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Description */}
+                <div className="mb-10">
+                  <label className="mb-2 block text-sm font-semibold text-gray-800">
+                    What are you project Description
+                  </label>
+                  <textarea
+                    value={projectDescriptionInput}
+                    onChange={(e) => setProjectDescriptionInput(e.target.value)}
+                    placeholder="Describe your project, subject, etc..."
+                    rows={4}
+                    className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-800 placeholder:text-gray-400 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-50 transition-all resize-none"
+                  />
+                </div>
+
+                {/* Action buttons */}
+                <div className="flex items-center justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowNewProject(false);
+                      setProjectNameInput("");
+                      setProjectDescriptionInput("");
+                      setCreateShareEmail("");
+                      setCreateInvites([]);
+                      setMemoryType("default");
+                      setMemoryExpanded(false);
+                    }}
+                    className="rounded-lg border border-gray-200 px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={creatingProject || !projectNameInput.trim()}
+                    className="rounded-lg bg-blue-500 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {creatingProject ? "Creating…" : "Create project"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
           {/* ── Home state: no active chat + chat panel ── */}
-          {isHomeState && (
+          {!showNewProject && isHomeState && (
             <div className="flex flex-1 flex-col items-center justify-center px-8 py-10">
               <p className="mb-1 text-[11px] font-bold tracking-widest text-gray-400 uppercase">
                 F-MATE
@@ -1320,7 +1546,7 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
           )}
 
           {/* ── Chat panel (active conversation) ── */}
-          {activePanel === "chat" && !isHomeState && (
+          {!showNewProject && activePanel === "chat" && !isHomeState && (
             <div className="flex min-h-0 flex-1 flex-col">
               {/* Chat header */}
               <div className="flex items-center justify-between border-b border-gray-100 px-6 py-3">
@@ -1541,50 +1767,9 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
           )}
 
           {/* ── Projects panel ── */}
-          {activePanel === "project" && (
+          {!showNewProject && activePanel === "project" && (
             <div className="flex-1 overflow-y-auto px-6 py-6">
               <div className="mx-auto max-w-3xl space-y-5">
-                {/* New project form */}
-                {(showNewProject || projects.length === 0) && (
-                  <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-                    <div className="mb-4 flex items-center justify-between">
-                      <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-                        <Plus className="h-4 w-4 text-violet-600" />
-                        New project
-                      </h2>
-                      {projects.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => setShowNewProject(false)}
-                          className="text-gray-400 hover:text-gray-700"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      )}
-                    </div>
-                    <form onSubmit={handleCreateProject} className="space-y-3">
-                      <Input
-                        value={projectNameInput}
-                        onChange={(e) => setProjectNameInput(e.target.value)}
-                        placeholder="Project name"
-                        className="rounded-xl border-gray-200 bg-gray-50 text-sm focus:bg-white"
-                        required
-                      />
-                      <Textarea
-                        value={projectDescriptionInput}
-                        onChange={(e) => setProjectDescriptionInput(e.target.value)}
-                        placeholder="Description (optional)"
-                        className="min-h-[72px] rounded-xl border-gray-200 bg-gray-50 text-sm focus:bg-white"
-                      />
-                      <Button
-                        disabled={creatingProject}
-                        className="w-full rounded-xl bg-violet-600 text-white hover:bg-violet-500 text-sm"
-                      >
-                        {creatingProject ? "Creating…" : "Create project"}
-                      </Button>
-                    </form>
-                  </div>
-                )}
 
                 {/* Project settings */}
                 {!activeProject ? (
@@ -1593,15 +1778,13 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
                     <p className="text-sm font-medium text-gray-500">
                       Select a project from the sidebar to edit it
                     </p>
-                    {!showNewProject && (
-                      <button
-                        type="button"
-                        onClick={() => setShowNewProject(true)}
-                        className="mt-4 inline-flex items-center gap-2 rounded-lg bg-violet-50 px-4 py-2 text-sm font-medium text-violet-600 hover:bg-violet-100 transition-colors"
-                      >
-                        <Plus className="h-4 w-4" /> New project
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => setShowNewProject(true)}
+                      className="mt-4 inline-flex items-center gap-2 rounded-lg bg-violet-50 px-4 py-2 text-sm font-medium text-violet-600 hover:bg-violet-100 transition-colors"
+                    >
+                      <Plus className="h-4 w-4" /> New project
+                    </button>
                   </div>
                 ) : (
                   <div className="space-y-4">
@@ -1826,7 +2009,7 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
           )}
 
           {/* ── Files panel ── */}
-          {activePanel === "files" && (
+          {!showNewProject && activePanel === "files" && (
             <div className="flex-1 overflow-y-auto px-6 py-6">
               <div className="mx-auto max-w-3xl">
                 {!activeProject ? (
@@ -1900,7 +2083,7 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
           )}
 
           {/* ── Invitations panel ── */}
-          {activePanel === "invitations" && (
+          {!showNewProject && activePanel === "invitations" && (
             <div className="flex-1 overflow-y-auto px-6 py-6">
               <div className="mx-auto max-w-3xl space-y-4">
                 {/* Accept by token */}
