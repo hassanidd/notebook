@@ -8,25 +8,37 @@ import {
   type FormEvent,
 } from "react";
 import {
-  Activity,
+  ArrowUpRight,
+  Bell,
   Bot,
-  ChevronDown,
+  ChevronLeft,
   ChevronRight,
+  Code2,
+  Download,
   FileText,
   FolderOpen,
+  FolderPlus,
+  HardDrive,
+  HelpCircle,
+  LayoutGrid,
+  Leaf,
+  Lightbulb,
   LogOut,
   Mail,
   MessageSquare,
   MoreHorizontal,
   Paperclip,
   Plus,
+  Search,
   SendHorizontal,
   Settings,
   Sparkles,
+  Star,
   Trash2,
   Upload,
   UserRound,
   X,
+  Zap,
 } from "lucide-react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
@@ -59,6 +71,25 @@ const PANEL_PATHS: Record<WorkspacePanel, string> = {
   invitations: "/invitations",
 };
 
+const AGENT_THEMES = [
+  { icon: Code2, bg: "bg-blue-100", color: "text-blue-600" },
+  { icon: Zap, bg: "bg-red-100", color: "text-red-500" },
+  { icon: Leaf, bg: "bg-green-100", color: "text-green-600" },
+  { icon: Sparkles, bg: "bg-amber-100", color: "text-amber-600" },
+  { icon: Lightbulb, bg: "bg-violet-100", color: "text-violet-600" },
+];
+
+const STATIC_SUGGESTIONS = [
+  "What's the status of my project?",
+  "Summarise recent documents",
+  "Find maintenance issues",
+  "Show production report",
+  "List pending tasks",
+  "What changed this week?",
+  "Generate a summary",
+  "Analyse my files",
+];
+
 function sortChatsByActivity(chats: ChatWithMessages[]): ChatWithMessages[] {
   return [...chats].sort((a, b) => {
     const aDate = new Date(a.last_message_at ?? a.updated_at).getTime();
@@ -87,6 +118,44 @@ function formatBytes(bytes: number): string {
   return (kb / 1024).toFixed(1) + " MB";
 }
 
+function FileTypeIcon({ filename, className }: { filename: string; className?: string }) {
+  const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+  if (ext === "pdf") return <FileText className={`${className ?? ""} text-red-500`} />;
+  if (["doc", "docx"].includes(ext)) return <FileText className={`${className ?? ""} text-blue-500`} />;
+  if (["xls", "xlsx"].includes(ext)) return <FileText className={`${className ?? ""} text-green-600`} />;
+  return <FileText className={`${className ?? ""} text-gray-400`} />;
+}
+
+function AgentCard({
+  project,
+  index,
+  onClick,
+}: {
+  project: Project;
+  index: number;
+  onClick: () => void;
+}) {
+  const theme = AGENT_THEMES[index % AGENT_THEMES.length];
+  const Icon = theme.icon;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-start gap-3 rounded-xl border border-gray-200 bg-white p-4 text-left hover:border-violet-200 hover:shadow-sm transition-all w-full"
+    >
+      <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg ${theme.bg}`}>
+        <Icon className={`h-4 w-4 ${theme.color}`} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-gray-800 truncate">{project.name}</p>
+        <p className="mt-0.5 line-clamp-2 text-xs text-gray-500">
+          {project.description || "Click to start chatting in this project"}
+        </p>
+      </div>
+    </button>
+  );
+}
+
 type WorkspacePageProps = { panel: WorkspacePanel };
 
 export default function WorkspacePage({ panel }: WorkspacePageProps) {
@@ -111,7 +180,6 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
   const [confirmingFileId, setConfirmingFileId] = useState<string | null>(null);
   const [deletingFileId, setDeletingFileId] = useState<string | null>(null);
   const [showNewProject, setShowNewProject] = useState(false);
-  const [projectsExpanded, setProjectsExpanded] = useState(true);
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [chats, setChats] = useState<ChatWithMessages[]>([]);
@@ -133,6 +201,13 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
   const [sharePermission, setSharePermission] = useState<SharePermission>("viewer");
   const [manualInvitationToken, setManualInvitationToken] = useState("");
 
+  // UI state
+  const [chatSearch, setChatSearch] = useState("");
+  const [chatTab, setChatTab] = useState<"active" | "archive">("active");
+  const [projectTab, setProjectTab] = useState<"active" | "archive">("active");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [openProjectMenuId, setOpenProjectMenuId] = useState<string | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const projectFileInputRef = useRef<HTMLInputElement | null>(null);
   const chatFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -144,20 +219,42 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
   const activePanel = panel;
 
   const navigateToPanel = useCallback(
-    (p: WorkspacePanel) => { if (p !== activePanel) navigate(PANEL_PATHS[p]); },
+    (p: WorkspacePanel) => {
+      if (p !== activePanel) navigate(PANEL_PATHS[p]);
+    },
     [activePanel, navigate],
   );
 
   const activeProject = useMemo(
-    () => projectFilter === ALL_PROJECTS_FILTER ? null : projects.find((p) => p.id === projectFilter) ?? null,
+    () =>
+      projectFilter === ALL_PROJECTS_FILTER
+        ? null
+        : projects.find((p) => p.id === projectFilter) ?? null,
     [projectFilter, projects],
   );
 
-  const isProjectOwner = Boolean(activeProject && user && activeProject.owner_id === user.id);
+  const isProjectOwner = Boolean(
+    activeProject && user && activeProject.owner_id === user.id,
+  );
 
-  const filteredChats = useMemo(
-    () => projectFilter === ALL_PROJECTS_FILTER ? chats : chats.filter((c) => c.project_id === projectFilter),
-    [chats, projectFilter],
+  const filteredChats = useMemo(() => {
+    let list =
+      projectFilter === ALL_PROJECTS_FILTER
+        ? chats
+        : chats.filter((c) => c.project_id === projectFilter);
+    if (chatSearch.trim()) {
+      const q = chatSearch.toLowerCase();
+      list = list.filter((c) => c.title.toLowerCase().includes(q));
+    }
+    return list;
+  }, [chats, projectFilter, chatSearch]);
+
+  const sidebarProjects = useMemo(
+    () =>
+      projects.filter((p) =>
+        projectTab === "archive" ? p.is_archived : !p.is_archived,
+      ),
+    [projects, projectTab],
   );
 
   const refreshProjects = useCallback(async () => {
@@ -168,7 +265,11 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
   const refreshChats = useCallback(async () => {
     const data = await backendApi.listChats();
     setChats(sortChatsByActivity(data));
-    if (data.length === 0) { setActiveChatId(null); setMessages([]); return; }
+    if (data.length === 0) {
+      setActiveChatId(null);
+      setMessages([]);
+      return;
+    }
     if (activeChatId && data.some((c) => c.id === activeChatId)) return;
     setActiveChatId(data[0].id);
   }, [activeChatId]);
@@ -176,14 +277,20 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
 
   const refreshInvitations = useCallback(async () => {
     setLoadingInvitations(true);
-    try { setInvitations(await backendApi.listPendingInvitations()); }
-    finally { setLoadingInvitations(false); }
+    try {
+      setInvitations(await backendApi.listPendingInvitations());
+    } finally {
+      setLoadingInvitations(false);
+    }
   }, []);
 
   const refreshProjectFiles = useCallback(async (projectId: string) => {
     setLoadingFiles(true);
-    try { setProjectFiles(await backendApi.listProjectFiles(projectId)); }
-    finally { setLoadingFiles(false); }
+    try {
+      setProjectFiles(await backendApi.listProjectFiles(projectId));
+    } finally {
+      setLoadingFiles(false);
+    }
   }, []);
 
   const refreshSingleProject = useCallback(async (projectId: string) => {
@@ -210,12 +317,24 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
     }
   }, []);
 
-  useEffect(() => { void loadWorkspace(); }, [loadWorkspace]);
-  useEffect(() => { activeChatIdRef.current = activeChatId; }, [activeChatId]);
-  useEffect(() => { projectFilterRef.current = projectFilter; }, [projectFilter]);
-  useEffect(() => { sendingMessageRef.current = sendingMessage; }, [sendingMessage]);
-  useEffect(() => { userIdRef.current = user?.id ?? null; }, [user?.id]);
-  useEffect(() => { refreshChatsRef.current = refreshChats; }, [refreshChats]);
+  useEffect(() => {
+    void loadWorkspace();
+  }, [loadWorkspace]);
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+  }, [activeChatId]);
+  useEffect(() => {
+    projectFilterRef.current = projectFilter;
+  }, [projectFilter]);
+  useEffect(() => {
+    sendingMessageRef.current = sendingMessage;
+  }, [sendingMessage]);
+  useEffect(() => {
+    userIdRef.current = user?.id ?? null;
+  }, [user?.id]);
+  useEffect(() => {
+    refreshChatsRef.current = refreshChats;
+  }, [refreshChats]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -225,13 +344,23 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
     let closedByCleanup = false;
 
     function clearTimers() {
-      if (reconnectTimer !== null) { window.clearTimeout(reconnectTimer); reconnectTimer = null; }
-      if (pingTimer !== null) { window.clearInterval(pingTimer); pingTimer = null; }
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      if (pingTimer !== null) {
+        window.clearInterval(pingTimer);
+        pingTimer = null;
+      }
     }
 
     function connect() {
       let socketUrl: string;
-      try { socketUrl = backendApi.getChatRealtimeSocketUrl(); } catch { return; }
+      try {
+        socketUrl = backendApi.getChatRealtimeSocketUrl();
+      } catch {
+        return;
+      }
       socket = new WebSocket(socketUrl);
       socket.onopen = () => {
         pingTimer = window.setInterval(() => {
@@ -240,7 +369,11 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
       };
       socket.onmessage = (event) => {
         let payload: ChatRealtimeEvent;
-        try { payload = JSON.parse(event.data) as ChatRealtimeEvent; } catch { return; }
+        try {
+          payload = JSON.parse(event.data) as ChatRealtimeEvent;
+        } catch {
+          return;
+        }
         if (payload.type === "pong" || payload.type === "ws_connected") return;
         if (payload.type === "chat_created") {
           if (payload.actor_user_id === userIdRef.current) return;
@@ -251,7 +384,10 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
         }
         if (payload.type === "chat_deleted") {
           setChats((prev) => prev.filter((c) => c.id !== payload.chat_id));
-          if (activeChatIdRef.current === payload.chat_id) { setActiveChatId(null); setMessages([]); }
+          if (activeChatIdRef.current === payload.chat_id) {
+            setActiveChatId(null);
+            setMessages([]);
+          }
           return;
         }
         if (payload.type === "message_created") {
@@ -264,7 +400,17 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
             const without = prev.filter((m) => m.id !== streamingId);
             const next = [...without, payload.message];
             if (payload.message.role !== "user") return next;
-            return [...next, { id: streamingId, chat_id: payload.chat_id, sender: null, role: "assistant", content: "", created_at: new Date().toISOString() }];
+            return [
+              ...next,
+              {
+                id: streamingId,
+                chat_id: payload.chat_id,
+                sender: null,
+                role: "assistant",
+                content: "",
+                created_at: new Date().toISOString(),
+              },
+            ];
           });
           return;
         }
@@ -276,7 +422,14 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
             const copy = [...prev];
             const idx = copy.findIndex((m) => m.id === streamingId);
             if (idx === -1) {
-              copy.push({ id: streamingId, chat_id: payload.chat_id, sender: null, role: "assistant", content: payload.content, created_at: new Date().toISOString() });
+              copy.push({
+                id: streamingId,
+                chat_id: payload.chat_id,
+                sender: null,
+                role: "assistant",
+                content: payload.content,
+                created_at: new Date().toISOString(),
+              });
               return copy;
             }
             copy[idx] = { ...copy[idx], content: copy[idx].content + payload.content };
@@ -288,9 +441,12 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
           if (payload.actor_user_id && payload.actor_user_id === userIdRef.current) return;
           void refreshChatsRef.current();
           if (activeChatIdRef.current === payload.chat_id && !sendingMessageRef.current) {
-            void backendApi.getChat(payload.chat_id).then((chat) => {
-              if (activeChatIdRef.current === payload.chat_id) setMessages(chat.messages);
-            }).catch(() => {});
+            void backendApi
+              .getChat(payload.chat_id)
+              .then((chat) => {
+                if (activeChatIdRef.current === payload.chat_id) setMessages(chat.messages);
+              })
+              .catch(() => {});
           }
         }
       };
@@ -298,15 +454,24 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
         clearTimers();
         if (!closedByCleanup) reconnectTimer = window.setTimeout(connect, 2000);
       };
-      socket.onerror = () => { socket?.close(); };
+      socket.onerror = () => {
+        socket?.close();
+      };
     }
 
     connect();
-    return () => { closedByCleanup = true; clearTimers(); socket?.close(); };
+    return () => {
+      closedByCleanup = true;
+      clearTimers();
+      socket?.close();
+    };
   }, [user?.id]);
 
   useEffect(() => {
-    if (!activeChatId) { if (!sendingMessage) setMessages([]); return; }
+    if (!activeChatId) {
+      if (!sendingMessage) setMessages([]);
+      return;
+    }
     if (sendingMessage) return;
     const chatId = activeChatId;
     let cancelled = false;
@@ -322,14 +487,23 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
       }
     }
     void load();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [activeChatId, sendingMessage]);
 
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   useEffect(() => {
     if (!activeProject) {
-      setEditName(""); setEditDescription(""); setEditInstructions(""); setEditArchived(false); setEditFavorite(false); setProjectFiles([]);
+      setEditName("");
+      setEditDescription("");
+      setEditInstructions("");
+      setEditArchived(false);
+      setEditFavorite(false);
+      setProjectFiles([]);
       return;
     }
     setEditName(activeProject.name);
@@ -346,15 +520,22 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
     if (!name) return;
     setCreatingProject(true);
     try {
-      const project = await backendApi.createProject({ name, description: projectDescriptionInput.trim() || undefined });
+      const project = await backendApi.createProject({
+        name,
+        description: projectDescriptionInput.trim() || undefined,
+      });
       setProjects((prev) => [project, ...prev]);
       setProjectFilter(project.id);
       navigateToPanel("project");
-      setProjectNameInput(""); setProjectDescriptionInput(""); setShowNewProject(false);
+      setProjectNameInput("");
+      setProjectDescriptionInput("");
+      setShowNewProject(false);
       toast.success("Project created.");
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Failed to create project."));
-    } finally { setCreatingProject(false); }
+    } finally {
+      setCreatingProject(false);
+    }
   }
 
   async function handleSaveProject(event: FormEvent<HTMLFormElement>) {
@@ -373,7 +554,9 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
       toast.success("Project saved.");
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Failed to save project."));
-    } finally { setSavingProject(false); }
+    } finally {
+      setSavingProject(false);
+    }
   }
 
   async function handleDeleteProjectById(project: Project) {
@@ -382,11 +565,16 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
     try {
       await backendApi.deleteProject(project.id);
       toast.success("Project deleted.");
-      if (projectFilter === project.id) { setProjectFilter(ALL_PROJECTS_FILTER); navigateToPanel("chat"); }
+      if (projectFilter === project.id) {
+        setProjectFilter(ALL_PROJECTS_FILTER);
+        navigateToPanel("chat");
+      }
       await Promise.all([refreshProjects(), refreshChats()]);
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Failed to delete project."));
-    } finally { setDeletingProjectId(null); }
+    } finally {
+      setDeletingProjectId(null);
+    }
   }
 
   async function handleDeleteProject() {
@@ -394,17 +582,25 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
   }
 
   async function handleDeleteChat(chat: ChatWithMessages) {
-    if (sendingMessage) { toast.error("Wait for the current response to finish."); return; }
+    if (sendingMessage) {
+      toast.error("Wait for the current response to finish.");
+      return;
+    }
     if (!window.confirm(`Delete "${chat.title}"?`)) return;
     setDeletingChatId(chat.id);
     try {
       await backendApi.deleteChat(chat.id);
-      if (activeChatId === chat.id) { setActiveChatId(null); setMessages([]); }
+      if (activeChatId === chat.id) {
+        setActiveChatId(null);
+        setMessages([]);
+      }
       await refreshChats();
       toast.success("Chat deleted.");
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Failed to delete chat."));
-    } finally { setDeletingChatId(null); }
+    } finally {
+      setDeletingChatId(null);
+    }
   }
 
   async function handleAddShare(event: FormEvent<HTMLFormElement>) {
@@ -414,13 +610,19 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
     if (!email) return;
     setAddingShare(true);
     try {
-      await backendApi.shareProject(activeProject.id, { user_email: email, permission: sharePermission });
-      setShareEmail(""); setSharePermission("viewer");
+      await backendApi.shareProject(activeProject.id, {
+        user_email: email,
+        permission: sharePermission,
+      });
+      setShareEmail("");
+      setSharePermission("viewer");
       await refreshSingleProject(activeProject.id);
       toast.success("Invitation sent.");
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Failed to share project."));
-    } finally { setAddingShare(false); }
+    } finally {
+      setAddingShare(false);
+    }
   }
 
   async function handleUpdateSharePermission(shareId: string, permission: SharePermission) {
@@ -432,7 +634,9 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
       toast.success("Permission updated.");
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Failed to update permission."));
-    } finally { setUpdatingShareId(null); }
+    } finally {
+      setUpdatingShareId(null);
+    }
   }
 
   async function handleRemoveShare(shareId: string) {
@@ -444,7 +648,9 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
       toast.success("Share removed.");
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Failed to remove share."));
-    } finally { setRemovingShareId(null); }
+    } finally {
+      setRemovingShareId(null);
+    }
   }
 
   async function handleAcceptInvitationToken(event: FormEvent<HTMLFormElement>) {
@@ -459,7 +665,9 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
       toast.success("Invitation accepted.");
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Failed to accept invitation."));
-    } finally { setAcceptingToken(false); }
+    } finally {
+      setAcceptingToken(false);
+    }
   }
 
   async function handleProjectFileSelected(event: ChangeEvent<HTMLInputElement>) {
@@ -478,7 +686,9 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
     } catch (error) {
       setConfirmingFileId(null);
       toast.error(getApiErrorMessage(error, "Failed to upload file."));
-    } finally { setUploadingProjectFile(false); }
+    } finally {
+      setUploadingProjectFile(false);
+    }
   }
 
   async function handleChatFileSelected(event: ChangeEvent<HTMLInputElement>) {
@@ -496,7 +706,9 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
     } catch (error) {
       setConfirmingFileId(null);
       toast.error(getApiErrorMessage(error, "Failed to upload file."));
-    } finally { setUploadingChatFile(false); }
+    } finally {
+      setUploadingChatFile(false);
+    }
   }
 
   async function handleDeleteFile(fileId: string) {
@@ -508,7 +720,9 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
       toast.success("File deleted.");
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Failed to delete file."));
-    } finally { setDeletingFileId(null); }
+    } finally {
+      setDeletingFileId(null);
+    }
   }
 
   function handleStartNewChat() {
@@ -527,7 +741,9 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
     const tempUserMsg: ChatMessage = {
       id: "local-user-" + Date.now(),
       chat_id: activeChatId ?? "",
-      sender: user ? { id: user.id, email: user.email, first_name: user.first_name, last_name: user.last_name } : null,
+      sender: user
+        ? { id: user.id, email: user.email, first_name: user.first_name, last_name: user.last_name }
+        : null,
       role: "user",
       content,
       created_at: new Date().toISOString(),
@@ -543,14 +759,26 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
     };
 
     setMessages((prev) => [...prev, tempUserMsg, streamingMsg]);
+    if (activePanel !== "chat") navigateToPanel("chat");
 
     try {
       const newChatId = await backendApi.sendChatMessage(
-        { chat_id: activeChatId ?? undefined, project_id: projectFilter !== ALL_PROJECTS_FILTER ? projectFilter : undefined, message: content },
         {
-          onChatId: (id) => { if (!activeChatId) setActiveChatId(id); },
+          chat_id: activeChatId ?? undefined,
+          project_id:
+            projectFilter !== ALL_PROJECTS_FILTER ? projectFilter : undefined,
+          message: content,
+        },
+        {
+          onChatId: (id) => {
+            if (!activeChatId) setActiveChatId(id);
+          },
           onChunk: (chunk) => {
-            setMessages((prev) => prev.map((m) => m.id === STREAMING_MESSAGE_ID ? { ...m, content: m.content + chunk } : m));
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === STREAMING_MESSAGE_ID ? { ...m, content: m.content + chunk } : m,
+              ),
+            );
           },
           onDone: () => {},
         },
@@ -562,9 +790,15 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
         setMessages(chat.messages);
       }
     } catch (error) {
-      setMessages((prev) => prev.filter((m) => m.id !== STREAMING_MESSAGE_ID && m.id !== tempUserMsg.id));
+      setMessages((prev) =>
+        prev.filter(
+          (m) => m.id !== STREAMING_MESSAGE_ID && m.id !== tempUserMsg.id,
+        ),
+      );
       toast.error(getApiErrorMessage(error, "Failed to send message."));
-    } finally { setSendingMessage(false); }
+    } finally {
+      setSendingMessage(false);
+    }
   }
 
   function handleSignOut() {
@@ -572,484 +806,1086 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
     navigate("/auth", { replace: true });
   }
 
-  const navItems = [
-    { key: "chat" as WorkspacePanel, label: "Chat", icon: MessageSquare },
-    { key: "project" as WorkspacePanel, label: "Projects", icon: FolderOpen },
-    { key: "files" as WorkspacePanel, label: "Files", icon: FileText },
-    { key: "invitations" as WorkspacePanel, label: "Invitations", icon: Mail, badge: invitations.length || undefined },
-  ];
+  const isHomeState =
+    activePanel === "chat" && !activeChatId && messages.length === 0 && !sendingMessage;
+
+  const activeChat = chats.find((c) => c.id === activeChatId);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50">
-      {/* ── Sidebar ── */}
-      <aside className="flex w-64 flex-shrink-0 flex-col bg-gray-950 text-gray-100 border-r border-gray-800">
-        {/* Brand */}
-        <div className="flex items-center gap-2.5 px-4 py-4 border-b border-gray-800">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 shadow-lg shadow-indigo-900/40">
-            <Sparkles className="h-4 w-4 text-white" />
-          </div>
-          <span className="text-sm font-semibold tracking-tight text-white">FMate</span>
-        </div>
-
-        {/* Nav */}
-        <nav className="px-2 py-3 space-y-0.5">
-          {navItems.map(({ key, label, icon: Icon, badge }) => {
-            const active = activePanel === key;
-            return (
-              <button
-                key={key}
-                type="button"
-                onClick={() => navigateToPanel(key)}
-                className={`w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors relative ${
-                  active
-                    ? "bg-indigo-600 text-white shadow-sm"
-                    : "text-gray-400 hover:bg-gray-800 hover:text-gray-100"
-                }`}
-              >
-                <Icon className="h-4 w-4 flex-shrink-0" />
-                <span className="flex-1 text-left">{label}</span>
-                {badge !== undefined && badge > 0 && (
-                  <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-indigo-500 px-1 text-[10px] font-bold text-white">
-                    {badge}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </nav>
-
-        <div className="mx-2 my-1 h-px bg-gray-800" />
-
-        {/* Projects section */}
-        <div className="px-2 py-2">
+    <div className="flex h-screen flex-col overflow-hidden bg-white">
+      {/* ── Top navigation bar ── */}
+      <header className="flex h-11 flex-shrink-0 items-center border-b border-gray-200 bg-white px-3 gap-3">
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => setProjectsExpanded((v) => !v)}
-            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-semibold tracking-wider text-gray-500 uppercase hover:text-gray-300 transition-colors"
+            className="rounded p-1.5 text-gray-500 hover:bg-gray-100 transition-colors"
           >
-            {projectsExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-            Projects
+            <LayoutGrid className="h-4 w-4" />
+          </button>
+          <div className="flex items-center gap-1.5">
+            <div className="flex h-5 w-5 items-center justify-center rounded bg-violet-600 text-[10px] font-bold text-white">
+              F
+            </div>
+            <span className="text-sm font-semibold text-gray-800">F-Mate</span>
+          </div>
+          <span className="text-gray-300">/</span>
+          <span className="text-sm text-gray-500">Mate</span>
+        </div>
+        <div className="ml-auto flex items-center gap-1">
+          {invitations.length > 0 && (
             <button
               type="button"
-              onClick={(e) => { e.stopPropagation(); setShowNewProject(true); navigateToPanel("project"); }}
-              className="ml-auto flex h-4 w-4 items-center justify-center rounded hover:bg-gray-700 hover:text-white"
+              onClick={() => navigateToPanel("invitations")}
+              className="relative rounded-full p-1.5 text-gray-500 hover:bg-gray-100 transition-colors"
             >
-              <Plus className="h-3 w-3" />
+              <Mail className="h-4 w-4" />
+              <span className="absolute -right-0.5 -top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-violet-600 text-[9px] font-bold text-white">
+                {invitations.length}
+              </span>
             </button>
+          )}
+          <button
+            type="button"
+            className="rounded-full p-1.5 text-gray-500 hover:bg-gray-100 transition-colors"
+          >
+            <HelpCircle className="h-4 w-4" />
           </button>
+          <button
+            type="button"
+            className="rounded-full p-1.5 text-gray-500 hover:bg-gray-100 transition-colors"
+          >
+            <Bell className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={handleSignOut}
+            title="Sign out"
+            className="ml-1 flex h-7 w-7 items-center justify-center rounded-full bg-violet-100 text-xs font-semibold text-violet-700 hover:bg-violet-200 transition-colors"
+          >
+            {user ? (user.first_name[0] ?? "U").toUpperCase() : "U"}
+          </button>
+        </div>
+      </header>
 
-          {projectsExpanded && (
-            <div className="mt-1 space-y-0.5">
+      {/* ── Body ── */}
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        {/* ── Sidebar ── */}
+        {!sidebarCollapsed && (
+          <aside className="flex w-52 flex-shrink-0 flex-col border-r border-gray-200 bg-white overflow-hidden">
+            {/* MATE header */}
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-[10px] font-bold tracking-widest text-gray-400 uppercase">
+                MATE
+              </span>
               <button
                 type="button"
-                onClick={() => setProjectFilter(ALL_PROJECTS_FILTER)}
-                className={`w-full flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors ${
-                  projectFilter === ALL_PROJECTS_FILTER
-                    ? "bg-gray-800 text-gray-100"
-                    : "text-gray-500 hover:bg-gray-800 hover:text-gray-300"
-                }`}
+                onClick={() => setSidebarCollapsed(true)}
+                className="rounded p-0.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
               >
-                <Activity className="h-3.5 w-3.5 flex-shrink-0" />
-                <span className="truncate">All conversations</span>
+                <ChevronLeft className="h-4 w-4" />
               </button>
+            </div>
 
-              {loadingWorkspace ? (
-                <div className="px-3 py-1 text-xs text-gray-600">Loading...</div>
-              ) : (
-                projects.map((project) => (
-                  <div key={project.id} className="group flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setProjectFilter(project.id)}
-                      className={`flex-1 min-w-0 flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors ${
-                        projectFilter === project.id
-                          ? "bg-gray-800 text-gray-100"
-                          : "text-gray-500 hover:bg-gray-800 hover:text-gray-300"
-                      }`}
-                    >
-                      <FolderOpen className="h-3.5 w-3.5 flex-shrink-0" />
-                      <span className="truncate">{project.name}</span>
-                    </button>
-                    {user?.id === project.owner_id && (
+            {/* Search */}
+            <div className="px-3 mb-2">
+              <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5">
+                <Search className="h-3.5 w-3.5 flex-shrink-0 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search chats"
+                  className="flex-1 bg-transparent text-xs text-gray-700 placeholder:text-gray-400 outline-none"
+                  value={chatSearch}
+                  onChange={(e) => setChatSearch(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {/* New chat + New project buttons */}
+            <div className="flex gap-1.5 px-3 mb-3">
+              <button
+                type="button"
+                onClick={handleStartNewChat}
+                className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-gray-200 bg-white py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                <Plus className="h-3 w-3" />
+                New chat
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowNewProject(true);
+                  navigateToPanel("project");
+                }}
+                className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-gray-200 bg-white py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                <FolderPlus className="h-3 w-3" />
+                New project
+              </button>
+            </div>
+
+            {/* Scrollable content */}
+            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+              {/* ── All chats ── */}
+              <div className="px-3 mb-2">
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <MessageSquare className="h-3.5 w-3.5 text-gray-500" />
+                  <span className="text-xs font-semibold text-gray-700">All chats</span>
+                </div>
+                {/* Active / Archive tabs */}
+                <div className="flex rounded-lg bg-gray-100 p-0.5 mb-2">
+                  <button
+                    type="button"
+                    className={`flex-1 rounded-md py-1 text-[11px] font-medium transition-colors ${
+                      chatTab === "active"
+                        ? "bg-white shadow-sm text-gray-800"
+                        : "text-gray-500 hover:text-gray-700"
+                    }`}
+                    onClick={() => setChatTab("active")}
+                  >
+                    Active
+                  </button>
+                  <button
+                    type="button"
+                    className={`flex-1 rounded-md py-1 text-[11px] font-medium transition-colors ${
+                      chatTab === "archive"
+                        ? "bg-white shadow-sm text-gray-800"
+                        : "text-gray-500 hover:text-gray-700"
+                    }`}
+                    onClick={() => setChatTab("archive")}
+                  >
+                    Archive
+                  </button>
+                </div>
+                {/* Chat list */}
+                <div className="space-y-0.5">
+                  {loadingWorkspace ? (
+                    <div className="px-2 py-1 text-[11px] text-gray-400">Loading…</div>
+                  ) : filteredChats.length === 0 ? (
+                    <div className="px-2 py-1 text-[11px] text-gray-400">No chats yet</div>
+                  ) : (
+                    filteredChats.map((chat) => (
+                      <div key={chat.id} className="group flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveChatId(chat.id);
+                            navigateToPanel("chat");
+                          }}
+                          className={`flex-1 min-w-0 truncate rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
+                            activeChatId === chat.id
+                              ? "bg-gray-100 text-gray-900 font-medium"
+                              : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                          }`}
+                        >
+                          {chat.title}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteChat(chat)}
+                          disabled={deletingChatId === chat.id || sendingMessage}
+                          className="hidden group-hover:flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-gray-400 hover:text-red-500 transition-colors"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="mx-3 my-1 h-px bg-gray-100" />
+
+              {/* ── All projects ── */}
+              <div className="px-3 mb-2">
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <FolderOpen className="h-3.5 w-3.5 text-gray-500" />
+                  <span className="text-xs font-semibold text-gray-700">All projects</span>
+                </div>
+                {/* Active / Archive tabs */}
+                <div className="flex rounded-lg bg-gray-100 p-0.5 mb-2">
+                  <button
+                    type="button"
+                    className={`flex-1 rounded-md py-1 text-[11px] font-medium transition-colors ${
+                      projectTab === "active"
+                        ? "bg-white shadow-sm text-gray-800"
+                        : "text-gray-500 hover:text-gray-700"
+                    }`}
+                    onClick={() => setProjectTab("active")}
+                  >
+                    Active
+                  </button>
+                  <button
+                    type="button"
+                    className={`flex-1 rounded-md py-1 text-[11px] font-medium transition-colors ${
+                      projectTab === "archive"
+                        ? "bg-white shadow-sm text-gray-800"
+                        : "text-gray-500 hover:text-gray-700"
+                    }`}
+                    onClick={() => setProjectTab("archive")}
+                  >
+                    Archive
+                  </button>
+                </div>
+                {/* Project list */}
+                <div className="space-y-0.5">
+                  {sidebarProjects.length === 0 ? (
+                    <div className="px-2 py-1 text-[11px] text-gray-400">No projects</div>
+                  ) : (
+                    sidebarProjects.map((project) => (
+                      <div key={project.id} className="group relative">
+                        <div
+                          className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs transition-colors cursor-pointer ${
+                            projectFilter === project.id
+                              ? "bg-gray-100 text-gray-900 font-medium"
+                              : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                          }`}
+                          onClick={() => {
+                            setProjectFilter(project.id);
+                            navigateToPanel("project");
+                          }}
+                        >
+                          <FolderOpen className="h-3.5 w-3.5 flex-shrink-0 text-gray-400" />
+                          <span className="flex-1 truncate">{project.name}</span>
+                          {project.is_favorite && (
+                            <Star className="h-3 w-3 flex-shrink-0 text-amber-400" />
+                          )}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenProjectMenuId(
+                                openProjectMenuId === project.id ? null : project.id,
+                              );
+                            }}
+                            className="hidden group-hover:flex h-4 w-4 flex-shrink-0 items-center justify-center rounded text-gray-400 hover:text-gray-700"
+                          >
+                            <MoreHorizontal className="h-3 w-3" />
+                          </button>
+                        </div>
+                        {openProjectMenuId === project.id && (
+                          <div className="absolute right-2 top-7 z-20 w-32 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOpenProjectMenuId(null);
+                                void handleDeleteProjectById(project);
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                              Delete
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* ── AI Drive (active project files) ── */}
+              {activeProject && (
+                <>
+                  <div className="mx-3 my-1 h-px bg-gray-100" />
+                  <div className="px-3 mb-2">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <HardDrive className="h-3.5 w-3.5 text-gray-500" />
+                        <span className="text-xs font-semibold text-gray-700">AI drive</span>
+                      </div>
                       <button
                         type="button"
-                        onClick={() => void handleDeleteProjectById(project)}
-                        disabled={deletingProjectId === project.id}
-                        className="hidden group-hover:flex h-6 w-6 items-center justify-center rounded text-gray-600 hover:bg-gray-800 hover:text-red-400 transition-colors flex-shrink-0"
+                        onClick={() => projectFileInputRef.current?.click()}
+                        disabled={uploadingProjectFile}
+                        className="text-[10px] text-violet-600 hover:text-violet-800 transition-colors"
                       >
-                        <Trash2 className="h-3 w-3" />
+                        {uploadingProjectFile ? "Uploading…" : "+ Upload"}
                       </button>
+                      <input
+                        ref={projectFileInputRef}
+                        type="file"
+                        className="hidden"
+                        onChange={handleProjectFileSelected}
+                      />
+                    </div>
+                    {loadingFiles ? (
+                      <div className="px-2 py-1 text-[11px] text-gray-400 animate-pulse">
+                        Loading…
+                      </div>
+                    ) : projectFiles.length === 0 ? (
+                      <div className="px-2 py-1 text-[11px] text-gray-400">No files yet</div>
+                    ) : (
+                      <div className="space-y-0.5">
+                        {projectFiles.map((file) => (
+                          <div
+                            key={file.id}
+                            className="group flex items-center gap-1.5 rounded px-2 py-1 text-[11px] text-gray-600 hover:bg-gray-50"
+                          >
+                            <FileTypeIcon filename={file.filename} className="h-3.5 w-3.5 flex-shrink-0" />
+                            <span className="flex-1 truncate">{file.filename}</span>
+                            <button
+                              type="button"
+                              onClick={() => void handleDeleteFile(file.id)}
+                              disabled={deletingFileId === file.id}
+                              className="hidden group-hover:flex text-gray-400 hover:text-red-500 transition-colors"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
-                ))
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="mx-2 my-1 h-px bg-gray-800" />
-
-        {/* Chats section */}
-        <div className="flex min-h-0 flex-1 flex-col px-2 py-2">
-          <div className="flex items-center gap-2 px-3 py-1.5">
-            <span className="text-xs font-semibold tracking-wider text-gray-500 uppercase flex-1">Chats</span>
-            <button
-              type="button"
-              onClick={handleStartNewChat}
-              className="flex h-4 w-4 items-center justify-center rounded hover:bg-gray-700 hover:text-white text-gray-500 transition-colors"
-            >
-              <Plus className="h-3 w-3" />
-            </button>
-          </div>
-
-          <div className="mt-1 min-h-0 flex-1 space-y-0.5 overflow-y-auto pr-1">
-            {loadingWorkspace ? (
-              <div className="px-3 py-1 text-xs text-gray-600">Loading...</div>
-            ) : filteredChats.length === 0 ? (
-              <div className="px-3 py-2 text-xs text-gray-600">No chats yet.</div>
-            ) : (
-              filteredChats.map((chat) => (
-                <div key={chat.id} className="group flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => { setActiveChatId(chat.id); navigateToPanel("chat"); }}
-                    className={`flex-1 min-w-0 flex flex-col rounded-md px-3 py-1.5 text-left transition-colors ${
-                      activeChatId === chat.id
-                        ? "bg-gray-800 text-gray-100"
-                        : "text-gray-500 hover:bg-gray-800 hover:text-gray-300"
-                    }`}
-                  >
-                    <span className="truncate text-sm leading-tight">{chat.title}</span>
-                    <span className="text-[11px] text-gray-600 mt-0.5">{formatDate(chat.last_message_at)}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleDeleteChat(chat)}
-                    disabled={deletingChatId === chat.id || sendingMessage}
-                    className="hidden group-hover:flex h-6 w-6 items-center justify-center rounded text-gray-600 hover:bg-gray-800 hover:text-red-400 transition-colors flex-shrink-0"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* User */}
-        <div className="border-t border-gray-800 px-3 py-3">
-          <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-semibold text-white">
-              {user ? (user.first_name[0] ?? "U").toUpperCase() : "U"}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-gray-200">
-                {user ? `${user.first_name} ${user.last_name}` : "User"}
-              </p>
-              <p className="truncate text-xs text-gray-500">{user?.email}</p>
-            </div>
-            <button
-              type="button"
-              onClick={handleSignOut}
-              title="Sign out"
-              className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded text-gray-500 hover:bg-gray-800 hover:text-gray-200 transition-colors"
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      </aside>
-
-      {/* ── Main content ── */}
-      <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {/* Top bar */}
-        <header className="flex items-center gap-4 border-b border-gray-200 bg-white px-6 py-3">
-          <div className="flex-1 min-w-0">
-            <h1 className="text-base font-semibold text-gray-900 truncate">
-              {activePanel === "chat" && (activeChatId ? (chats.find((c) => c.id === activeChatId)?.title ?? "Chat") : "New conversation")}
-              {activePanel === "project" && (activeProject ? activeProject.name : "Projects")}
-              {activePanel === "files" && "Files"}
-              {activePanel === "invitations" && "Invitations"}
-            </h1>
-            <p className="text-xs text-gray-500">
-              {activeProject ? `Project: ${activeProject.name}` : "All projects"}
-            </p>
-          </div>
-          {activePanel === "chat" && (
-            <Button
-              size="sm"
-              onClick={handleStartNewChat}
-              className="gap-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 text-xs"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              New chat
-            </Button>
-          )}
-        </header>
-
-        {/* ── Chat panel ── */}
-        {activePanel === "chat" && (
-          <div className="flex min-h-0 flex-1 flex-col">
-            {/* Messages */}
-            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-              {messages.length === 0 ? (
-                loadingChat ? (
-                  <div className="flex items-center justify-center h-full">
-                    <div className="text-sm text-gray-400 animate-pulse">Loading conversation...</div>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center h-full gap-4 text-center">
-                    <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-50 border border-indigo-100">
-                      <Bot className="h-8 w-8 text-indigo-400" />
-                    </div>
-                    <div>
-                      <p className="text-base font-semibold text-gray-700">Start a conversation</p>
-                      <p className="text-sm text-gray-400 mt-1">
-                        {activeProject ? `Chatting in project "${activeProject.name}"` : "Ask anything about your projects and files."}
-                      </p>
-                    </div>
-                  </div>
-                )
-              ) : (
-                <div className="mx-auto max-w-3xl space-y-6">
-                  {messages.map((message) => {
-                    const isAssistant = message.role === "assistant";
-                    const isStreamingPlaceholder = isAssistant && !message.content && (message.id === STREAMING_MESSAGE_ID || message.id.startsWith(REALTIME_STREAMING_MESSAGE_PREFIX));
-                    const isCurrentUser = message.role === "user" && (message.id.startsWith("local-user-") || (user?.id !== undefined && user?.id !== null && message.sender?.id === user.id));
-                    const isOtherUser = message.role === "user" && !isCurrentUser;
-
-                    let senderName = "Assistant";
-                    if (isCurrentUser) senderName = "You";
-                    else if (isOtherUser) {
-                      const full = [message.sender?.first_name, message.sender?.last_name].filter(Boolean).join(" ").trim();
-                      senderName = full || message.sender?.email || "Teammate";
-                    }
-
-                    if (isAssistant) {
-                      return (
-                        <div key={message.id} className="flex gap-3">
-                          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-indigo-100 border border-indigo-200">
-                            <Bot className="h-4 w-4 text-indigo-600" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="mb-1.5 text-xs font-medium text-gray-400">{senderName}</p>
-                            <div className="rounded-2xl rounded-tl-sm bg-white border border-gray-200 px-4 py-3 text-sm leading-relaxed text-gray-800 shadow-sm">
-                              {isStreamingPlaceholder ? (
-                                <div className="flex gap-1 items-center h-5">
-                                  <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-bounce [animation-delay:0ms]" />
-                                  <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-bounce [animation-delay:150ms]" />
-                                  <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-bounce [animation-delay:300ms]" />
-                                </div>
-                              ) : (
-                                <p className="whitespace-pre-wrap">{message.content || "..."}</p>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <div key={message.id} className={`flex gap-3 ${isCurrentUser ? "flex-row-reverse" : ""}`}>
-                        <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-xs font-semibold ${isCurrentUser ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-600"}`}>
-                          {senderName[0]?.toUpperCase()}
-                        </div>
-                        <div className={`max-w-[70%] min-w-0 ${isCurrentUser ? "items-end" : "items-start"} flex flex-col`}>
-                          <p className={`mb-1.5 text-xs font-medium text-gray-400 ${isCurrentUser ? "text-right" : ""}`}>{senderName}</p>
-                          <div className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${isCurrentUser ? "bg-indigo-600 text-white rounded-tr-sm" : "bg-gray-100 text-gray-800 border border-gray-200 rounded-tl-sm"}`}>
-                            <p className="whitespace-pre-wrap">{message.content}</p>
-                          </div>
-                          <p className="mt-1 text-[11px] text-gray-400">{formatDate(message.created_at)}</p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {loadingChat && (
-                    <p className="text-center text-xs text-gray-400 animate-pulse">Syncing...</p>
-                  )}
-                  <div ref={messagesEndRef} />
-                </div>
+                </>
               )}
             </div>
 
-            {/* Input */}
-            <div className="border-t border-gray-200 bg-white px-6 py-4">
-              <form onSubmit={handleSendMessage} className="mx-auto max-w-3xl">
-                <div className="flex items-end gap-3 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 focus-within:border-indigo-300 focus-within:bg-white focus-within:ring-4 focus-within:ring-indigo-50 transition-all">
-                  <div className="flex-1">
-                    <Textarea
-                      value={messageInput}
-                      onChange={(e) => setMessageInput(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); } }}
-                      placeholder="Ask anything… (Enter to send, Shift+Enter for newline)"
-                      className="min-h-[44px] max-h-48 resize-none border-0 bg-transparent p-0 text-sm text-gray-800 placeholder:text-gray-400 focus-visible:ring-0 shadow-none"
-                      rows={1}
-                    />
-                  </div>
-                  <div className="flex items-center gap-2 pb-0.5">
-                    <button
-                      type="button"
-                      onClick={() => chatFileInputRef.current?.click()}
-                      disabled={!activeChatId || uploadingChatFile}
-                      title="Attach file"
-                      className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-200 hover:text-gray-700 disabled:opacity-40 transition-colors"
-                    >
-                      <Paperclip className="h-4 w-4" />
-                    </button>
-                    <input ref={chatFileInputRef} type="file" className="hidden" onChange={handleChatFileSelected} />
-                    <button
-                      type="submit"
-                      disabled={sendingMessage || loadingWorkspace || !messageInput.trim()}
-                      className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                    >
-                      <SendHorizontal className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-                {uploadingChatFile && (
-                  <p className="mt-2 text-xs text-indigo-500 animate-pulse">Uploading file...</p>
-                )}
-              </form>
+            {/* ── Bottom: Import conversations ── */}
+            <div className="border-t border-gray-100 px-3 py-2.5">
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition-colors"
+              >
+                <Download className="h-3.5 w-3.5 flex-shrink-0" />
+                Import conversations
+              </button>
             </div>
+          </aside>
+        )}
+
+        {/* Collapsed sidebar toggle */}
+        {sidebarCollapsed && (
+          <div className="flex w-10 flex-shrink-0 flex-col items-center border-r border-gray-200 bg-white py-3 gap-3">
+            <button
+              type="button"
+              onClick={() => setSidebarCollapsed(false)}
+              className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
           </div>
         )}
 
-        {/* ── Projects panel ── */}
-        {activePanel === "project" && (
-          <div className="flex-1 overflow-y-auto px-6 py-6">
-            <div className="mx-auto max-w-3xl space-y-6">
-              {/* New project form */}
-              {(showNewProject || projects.length === 0) && (
-                <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-                  <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-                      <Plus className="h-4 w-4 text-indigo-600" />
-                      New project
-                    </h2>
-                    {projects.length > 0 && (
-                      <button type="button" onClick={() => setShowNewProject(false)} className="text-gray-400 hover:text-gray-700">
-                        <X className="h-4 w-4" />
-                      </button>
-                    )}
+        {/* ── Main content ── */}
+        <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
+          {/* ── Home state: no active chat + chat panel ── */}
+          {isHomeState && (
+            <div className="flex flex-1 flex-col items-center justify-center px-8 py-10">
+              <p className="mb-1 text-[11px] font-bold tracking-widest text-gray-400 uppercase">
+                F-MATE
+              </p>
+              <h1 className="mb-8 text-3xl font-bold text-gray-900">
+                What are you working on today?
+              </h1>
+
+              {/* Agent cards */}
+              {loadingWorkspace ? (
+                <div className="mb-8 text-sm text-gray-400 animate-pulse">Loading projects…</div>
+              ) : projects.length === 0 ? (
+                <div className="mb-8 text-center">
+                  <p className="text-sm text-gray-500">No projects yet. Create one to get started.</p>
+                </div>
+              ) : (
+                <div className="mb-8 w-full max-w-2xl space-y-3">
+                  <div className="grid grid-cols-3 gap-3">
+                    {projects.slice(0, 3).map((project, i) => (
+                      <AgentCard
+                        key={project.id}
+                        project={project}
+                        index={i}
+                        onClick={() => {
+                          setProjectFilter(project.id);
+                        }}
+                      />
+                    ))}
                   </div>
-                  <form onSubmit={handleCreateProject} className="space-y-3">
-                    <Input
-                      value={projectNameInput}
-                      onChange={(e) => setProjectNameInput(e.target.value)}
-                      placeholder="Project name"
-                      className="rounded-xl border-gray-200 bg-gray-50 focus:bg-white text-sm"
-                      required
-                    />
-                    <Textarea
-                      value={projectDescriptionInput}
-                      onChange={(e) => setProjectDescriptionInput(e.target.value)}
-                      placeholder="Description (optional)"
-                      className="rounded-xl border-gray-200 bg-gray-50 focus:bg-white text-sm min-h-[72px]"
-                    />
-                    <Button disabled={creatingProject} className="w-full rounded-xl bg-indigo-600 text-white hover:bg-indigo-500 text-sm">
-                      {creatingProject ? "Creating..." : "Create project"}
-                    </Button>
-                  </form>
+                  {projects.length > 3 && (
+                    <div className="grid grid-cols-2 gap-3 px-[calc(33.33%/2-6px)]" style={{ paddingLeft: 0, paddingRight: 0 }}>
+                      <div className="grid grid-cols-2 gap-3 col-span-2" style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: "repeat(2, 1fr)", paddingLeft: "calc(33.33333% / 2 - 6px)", paddingRight: "calc(33.33333% / 2 - 6px)" }}>
+                        {projects.slice(3, 5).map((project, i) => (
+                          <AgentCard
+                            key={project.id}
+                            project={project}
+                            index={i + 3}
+                            onClick={() => {
+                              setProjectFilter(project.id);
+                            }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* Project settings */}
-              {!activeProject ? (
-                <div className="rounded-2xl border border-dashed border-gray-200 bg-white p-10 text-center">
-                  <FolderOpen className="h-10 w-10 text-gray-300 mx-auto mb-3" />
-                  <p className="text-sm font-medium text-gray-500">Select a project from the sidebar to edit it</p>
-                  {!showNewProject && (
-                    <button
-                      type="button"
-                      onClick={() => setShowNewProject(true)}
-                      className="mt-4 inline-flex items-center gap-2 rounded-lg bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-100 transition-colors"
-                    >
-                      <Plus className="h-4 w-4" /> New project
-                    </button>
+              {/* Message input */}
+              <div className="w-full max-w-2xl">
+                <form onSubmit={handleSendMessage}>
+                  <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm focus-within:border-violet-300 focus-within:ring-2 focus-within:ring-violet-50 transition-all">
+                    <Textarea
+                      value={messageInput}
+                      onChange={(e) => setMessageInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          e.currentTarget.form?.requestSubmit();
+                        }
+                      }}
+                      placeholder="Message to F-mate..."
+                      className="min-h-[40px] max-h-40 resize-none border-0 bg-transparent p-0 text-sm text-gray-800 placeholder:text-gray-400 focus-visible:ring-0 shadow-none"
+                      rows={1}
+                    />
+                  </div>
+                  <div className="mt-2 flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => chatFileInputRef.current?.click()}
+                        className="flex h-7 w-7 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 transition-colors"
+                        title="Attach file"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        className="flex h-7 w-7 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 transition-colors"
+                        title="Code"
+                      >
+                        <Code2 className="h-3.5 w-3.5" />
+                      </button>
+                      {activeProject && (
+                        <span className="flex items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-medium text-violet-700">
+                          <FolderOpen className="h-3 w-3" />
+                          {activeProject.name}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="flex items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+                      >
+                        <Sparkles className="h-3 w-3 text-violet-500" />
+                        GPT 4.0
+                        <ChevronRight className="h-3 w-3 rotate-90 text-gray-400" />
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={sendingMessage || !messageInput.trim()}
+                        className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-600 text-white hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <SendHorizontal className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                  <input
+                    ref={chatFileInputRef}
+                    type="file"
+                    className="hidden"
+                    onChange={handleChatFileSelected}
+                  />
+                </form>
+
+                {/* Suggestion chips */}
+                <div className="mt-4 space-y-2">
+                  <div className="flex flex-wrap gap-2">
+                    {STATIC_SUGGESTIONS.slice(0, 4).map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => setMessageInput(s)}
+                        className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-600 hover:border-violet-200 hover:text-violet-700 transition-colors"
+                      >
+                        {s}
+                        <ArrowUpRight className="h-3 w-3 flex-shrink-0 text-gray-400" />
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {STATIC_SUGGESTIONS.slice(4).map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => setMessageInput(s)}
+                        className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-600 hover:border-violet-200 hover:text-violet-700 transition-colors"
+                      >
+                        {s}
+                        <ArrowUpRight className="h-3 w-3 flex-shrink-0 text-gray-400" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Chat panel (active conversation) ── */}
+          {activePanel === "chat" && !isHomeState && (
+            <div className="flex min-h-0 flex-1 flex-col">
+              {/* Chat header */}
+              <div className="flex items-center justify-between border-b border-gray-100 px-6 py-3">
+                <div className="min-w-0 flex-1">
+                  <h2 className="truncate text-sm font-semibold text-gray-800">
+                    {activeChat?.title ?? "New conversation"}
+                  </h2>
+                  {activeProject && (
+                    <p className="text-xs text-gray-400">{activeProject.name}</p>
                   )}
                 </div>
-              ) : (
-                <div className="space-y-4">
-                  {/* Settings card */}
+                <button
+                  type="button"
+                  onClick={handleStartNewChat}
+                  className="ml-4 flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  New chat
+                </button>
+              </div>
+
+              {/* Messages */}
+              <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+                {messages.length === 0 ? (
+                  loadingChat ? (
+                    <div className="flex h-full items-center justify-center">
+                      <p className="text-sm text-gray-400 animate-pulse">Loading conversation…</p>
+                    </div>
+                  ) : (
+                    <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-50 border border-violet-100">
+                        <Bot className="h-6 w-6 text-violet-400" />
+                      </div>
+                      <p className="text-sm font-medium text-gray-600">
+                        {activeProject
+                          ? `Chatting in "${activeProject.name}"`
+                          : "Start a new conversation"}
+                      </p>
+                    </div>
+                  )
+                ) : (
+                  <div className="mx-auto max-w-3xl space-y-6">
+                    {messages.map((message) => {
+                      const isAssistant = message.role === "assistant";
+                      const isStreaming =
+                        isAssistant &&
+                        !message.content &&
+                        (message.id === STREAMING_MESSAGE_ID ||
+                          message.id.startsWith(REALTIME_STREAMING_MESSAGE_PREFIX));
+                      const isCurrentUser =
+                        message.role === "user" &&
+                        (message.id.startsWith("local-user-") ||
+                          (user?.id != null && message.sender?.id === user.id));
+                      const isOtherUser = message.role === "user" && !isCurrentUser;
+
+                      let senderName = "F-Mate";
+                      if (isCurrentUser) senderName = "You";
+                      else if (isOtherUser) {
+                        const full = [message.sender?.first_name, message.sender?.last_name]
+                          .filter(Boolean)
+                          .join(" ")
+                          .trim();
+                        senderName = full || message.sender?.email || "Teammate";
+                      }
+
+                      if (isAssistant) {
+                        return (
+                          <div key={message.id} className="flex gap-3">
+                            <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-violet-100 border border-violet-200">
+                              <Bot className="h-3.5 w-3.5 text-violet-600" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="mb-1 text-[11px] font-medium text-gray-400">
+                                {senderName}
+                              </p>
+                              <div className="rounded-2xl rounded-tl-sm border border-gray-200 bg-white px-4 py-3 text-sm leading-relaxed text-gray-800 shadow-sm">
+                                {isStreaming ? (
+                                  <div className="flex h-5 items-center gap-1">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-bounce [animation-delay:0ms]" />
+                                    <span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-bounce [animation-delay:150ms]" />
+                                    <span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-bounce [animation-delay:300ms]" />
+                                  </div>
+                                ) : (
+                                  <p className="whitespace-pre-wrap">{message.content || "…"}</p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div
+                          key={message.id}
+                          className={`flex gap-3 ${isCurrentUser ? "flex-row-reverse" : ""}`}
+                        >
+                          <div
+                            className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${
+                              isCurrentUser
+                                ? "bg-violet-600 text-white"
+                                : "bg-gray-200 text-gray-600"
+                            }`}
+                          >
+                            {senderName[0]?.toUpperCase()}
+                          </div>
+                          <div
+                            className={`max-w-[70%] min-w-0 flex flex-col ${
+                              isCurrentUser ? "items-end" : "items-start"
+                            }`}
+                          >
+                            <p
+                              className={`mb-1 text-[11px] font-medium text-gray-400 ${
+                                isCurrentUser ? "text-right" : ""
+                              }`}
+                            >
+                              {senderName}
+                            </p>
+                            <div
+                              className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                                isCurrentUser
+                                  ? "bg-violet-600 text-white rounded-tr-sm"
+                                  : "border border-gray-200 bg-gray-50 text-gray-800 rounded-tl-sm"
+                              }`}
+                            >
+                              <p className="whitespace-pre-wrap">{message.content}</p>
+                            </div>
+                            <p className="mt-1 text-[10px] text-gray-400">
+                              {formatDate(message.created_at)}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {loadingChat && (
+                      <p className="text-center text-xs text-gray-400 animate-pulse">
+                        Syncing…
+                      </p>
+                    )}
+                    <div ref={messagesEndRef} />
+                  </div>
+                )}
+              </div>
+
+              {/* Input bar */}
+              <div className="border-t border-gray-100 bg-white px-6 py-4">
+                <form onSubmit={handleSendMessage} className="mx-auto max-w-3xl">
+                  <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 focus-within:border-violet-300 focus-within:ring-2 focus-within:ring-violet-50 transition-all shadow-sm">
+                    <Textarea
+                      value={messageInput}
+                      onChange={(e) => setMessageInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          e.currentTarget.form?.requestSubmit();
+                        }
+                      }}
+                      placeholder="Message to F-mate..."
+                      className="min-h-[40px] max-h-48 resize-none border-0 bg-transparent p-0 text-sm text-gray-800 placeholder:text-gray-400 focus-visible:ring-0 shadow-none"
+                      rows={1}
+                    />
+                  </div>
+                  <div className="mt-2 flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => chatFileInputRef.current?.click()}
+                        disabled={!activeChatId || uploadingChatFile}
+                        className="flex h-7 w-7 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 disabled:opacity-40 transition-colors"
+                        title="Attach file"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        className="flex h-7 w-7 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 transition-colors"
+                      >
+                        <Code2 className="h-3.5 w-3.5" />
+                      </button>
+                      {activeProject && (
+                        <span className="flex items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-medium text-violet-700">
+                          <FolderOpen className="h-3 w-3" />
+                          {activeProject.name}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="flex items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+                      >
+                        <Sparkles className="h-3 w-3 text-violet-500" />
+                        GPT 4.0
+                        <ChevronRight className="h-3 w-3 rotate-90 text-gray-400" />
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={sendingMessage || loadingWorkspace || !messageInput.trim()}
+                        className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-600 text-white hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <SendHorizontal className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                  <input
+                    ref={chatFileInputRef}
+                    type="file"
+                    className="hidden"
+                    onChange={handleChatFileSelected}
+                  />
+                  {uploadingChatFile && (
+                    <p className="mt-1 text-[11px] text-violet-500 animate-pulse">
+                      Uploading file…
+                    </p>
+                  )}
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* ── Projects panel ── */}
+          {activePanel === "project" && (
+            <div className="flex-1 overflow-y-auto px-6 py-6">
+              <div className="mx-auto max-w-3xl space-y-5">
+                {/* New project form */}
+                {(showNewProject || projects.length === 0) && (
                   <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-                    <h2 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                      <Settings className="h-4 w-4 text-gray-500" /> Project settings
-                    </h2>
-                    <form onSubmit={handleSaveProject} className="space-y-3">
-                      <div>
-                        <label className="text-xs font-medium text-gray-600 mb-1 block">Name</label>
-                        <Input value={editName} onChange={(e) => setEditName(e.target.value)} className="rounded-xl border-gray-200 text-sm" required />
-                      </div>
-                      <div>
-                        <label className="text-xs font-medium text-gray-600 mb-1 block">Description</label>
-                        <Textarea value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder="No description" className="rounded-xl border-gray-200 text-sm min-h-[72px]" />
-                      </div>
-                      <div>
-                        <label className="text-xs font-medium text-gray-600 mb-1 block">Instructions for AI</label>
-                        <Textarea value={editInstructions} onChange={(e) => setEditInstructions(e.target.value)} placeholder="Custom instructions..." className="rounded-xl border-gray-200 text-sm min-h-[100px]" />
-                      </div>
-                      <div className="flex items-center gap-4 pt-1">
-                        <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
-                          <input type="checkbox" checked={editArchived} onChange={(e) => setEditArchived(e.target.checked)} className="rounded border-gray-300" />
-                          Archived
-                        </label>
-                        <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
-                          <input type="checkbox" checked={editFavorite} onChange={(e) => setEditFavorite(e.target.checked)} className="rounded border-gray-300" />
-                          Favorite
-                        </label>
-                      </div>
-                      <div className="flex gap-2 pt-1">
-                        <Button disabled={savingProject} className="rounded-xl bg-indigo-600 text-white hover:bg-indigo-500 text-sm">
-                          {savingProject ? "Saving..." : "Save changes"}
-                        </Button>
-                        {isProjectOwner && (
-                          <Button type="button" variant="outline" onClick={() => void handleDeleteProject()} disabled={!!deletingProjectId} className="rounded-xl border-red-200 text-red-600 hover:bg-red-50 text-sm">
-                            <Trash2 className="h-3.5 w-3.5" />
-                            {deletingProjectId ? "Deleting..." : "Delete"}
-                          </Button>
-                        )}
-                      </div>
+                    <div className="mb-4 flex items-center justify-between">
+                      <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                        <Plus className="h-4 w-4 text-violet-600" />
+                        New project
+                      </h2>
+                      {projects.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setShowNewProject(false)}
+                          className="text-gray-400 hover:text-gray-700"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                    <form onSubmit={handleCreateProject} className="space-y-3">
+                      <Input
+                        value={projectNameInput}
+                        onChange={(e) => setProjectNameInput(e.target.value)}
+                        placeholder="Project name"
+                        className="rounded-xl border-gray-200 bg-gray-50 text-sm focus:bg-white"
+                        required
+                      />
+                      <Textarea
+                        value={projectDescriptionInput}
+                        onChange={(e) => setProjectDescriptionInput(e.target.value)}
+                        placeholder="Description (optional)"
+                        className="min-h-[72px] rounded-xl border-gray-200 bg-gray-50 text-sm focus:bg-white"
+                      />
+                      <Button
+                        disabled={creatingProject}
+                        className="w-full rounded-xl bg-violet-600 text-white hover:bg-violet-500 text-sm"
+                      >
+                        {creatingProject ? "Creating…" : "Create project"}
+                      </Button>
                     </form>
                   </div>
+                )}
 
-                  {/* Files card */}
+                {/* Project settings */}
+                {!activeProject ? (
+                  <div className="rounded-2xl border border-dashed border-gray-200 bg-white p-10 text-center">
+                    <FolderOpen className="mx-auto mb-3 h-10 w-10 text-gray-300" />
+                    <p className="text-sm font-medium text-gray-500">
+                      Select a project from the sidebar to edit it
+                    </p>
+                    {!showNewProject && (
+                      <button
+                        type="button"
+                        onClick={() => setShowNewProject(true)}
+                        className="mt-4 inline-flex items-center gap-2 rounded-lg bg-violet-50 px-4 py-2 text-sm font-medium text-violet-600 hover:bg-violet-100 transition-colors"
+                      >
+                        <Plus className="h-4 w-4" /> New project
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* Settings card */}
+                    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+                      <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-gray-900">
+                        <Settings className="h-4 w-4 text-gray-500" /> Project settings
+                      </h2>
+                      <form onSubmit={handleSaveProject} className="space-y-3">
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-gray-600">
+                            Name
+                          </label>
+                          <Input
+                            value={editName}
+                            onChange={(e) => setEditName(e.target.value)}
+                            className="rounded-xl border-gray-200 text-sm"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-gray-600">
+                            Description
+                          </label>
+                          <Textarea
+                            value={editDescription}
+                            onChange={(e) => setEditDescription(e.target.value)}
+                            placeholder="No description"
+                            className="min-h-[72px] rounded-xl border-gray-200 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-gray-600">
+                            Instructions for AI
+                          </label>
+                          <Textarea
+                            value={editInstructions}
+                            onChange={(e) => setEditInstructions(e.target.value)}
+                            placeholder="Custom instructions…"
+                            className="min-h-[100px] rounded-xl border-gray-200 text-sm"
+                          />
+                        </div>
+                        <div className="flex items-center gap-4 pt-1">
+                          <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-600">
+                            <input
+                              type="checkbox"
+                              checked={editArchived}
+                              onChange={(e) => setEditArchived(e.target.checked)}
+                              className="rounded border-gray-300"
+                            />
+                            Archived
+                          </label>
+                          <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-600">
+                            <input
+                              type="checkbox"
+                              checked={editFavorite}
+                              onChange={(e) => setEditFavorite(e.target.checked)}
+                              className="rounded border-gray-300"
+                            />
+                            Favourite
+                          </label>
+                        </div>
+                        <div className="flex gap-2 pt-1">
+                          <Button
+                            disabled={savingProject}
+                            className="rounded-xl bg-violet-600 text-white hover:bg-violet-500 text-sm"
+                          >
+                            {savingProject ? "Saving…" : "Save changes"}
+                          </Button>
+                          {isProjectOwner && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => void handleDeleteProject()}
+                              disabled={!!deletingProjectId}
+                              className="rounded-xl border-red-200 text-red-600 hover:bg-red-50 text-sm"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              {deletingProjectId ? "Deleting…" : "Delete"}
+                            </Button>
+                          )}
+                        </div>
+                      </form>
+                    </div>
+
+                    {/* Files card */}
+                    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+                      <div className="mb-4 flex items-center justify-between">
+                        <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                          <FileText className="h-4 w-4 text-gray-500" /> Files
+                        </h2>
+                        <button
+                          type="button"
+                          onClick={() => projectFileInputRef.current?.click()}
+                          disabled={uploadingProjectFile}
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-violet-50 px-3 py-1.5 text-xs font-medium text-violet-600 hover:bg-violet-100 disabled:opacity-50 transition-colors"
+                        >
+                          <Upload className="h-3.5 w-3.5" />
+                          {uploadingProjectFile ? "Uploading…" : "Upload"}
+                        </button>
+                        <input
+                          ref={projectFileInputRef}
+                          type="file"
+                          className="hidden"
+                          onChange={handleProjectFileSelected}
+                        />
+                      </div>
+                      {loadingFiles ? (
+                        <p className="animate-pulse text-sm text-gray-400">Loading files…</p>
+                      ) : projectFiles.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-gray-200 py-8 text-center">
+                          <FileText className="mx-auto mb-2 h-8 w-8 text-gray-300" />
+                          <p className="text-xs text-gray-400">No files uploaded yet</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {projectFiles.map((file) => (
+                            <div
+                              key={file.id}
+                              className="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3"
+                            >
+                              <FileTypeIcon filename={file.filename} className="h-4 w-4 flex-shrink-0" />
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-sm text-gray-800">{file.filename}</p>
+                                <p className="text-xs text-gray-400">
+                                  {formatBytes(file.file_size)} · {formatDate(file.created_at)}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => void handleDeleteFile(file.id)}
+                                disabled={deletingFileId === file.id}
+                                className="text-gray-400 hover:text-red-500 transition-colors"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Sharing card */}
+                    {isProjectOwner && (
+                      <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+                        <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-gray-900">
+                          <UserRound className="h-4 w-4 text-gray-500" /> Sharing
+                        </h2>
+                        <form onSubmit={handleAddShare} className="mb-4 flex gap-2">
+                          <Input
+                            type="email"
+                            value={shareEmail}
+                            onChange={(e) => setShareEmail(e.target.value)}
+                            placeholder="teammate@example.com"
+                            className="flex-1 rounded-xl border-gray-200 text-sm"
+                            required
+                          />
+                          <select
+                            value={sharePermission}
+                            onChange={(e) =>
+                              setSharePermission(e.target.value as SharePermission)
+                            }
+                            className="rounded-xl border border-gray-200 bg-white px-2 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-violet-300"
+                          >
+                            <option value="viewer">Viewer</option>
+                            <option value="editor">Editor</option>
+                          </select>
+                          <Button
+                            disabled={addingShare}
+                            className="whitespace-nowrap rounded-xl bg-violet-600 text-white hover:bg-violet-500 text-sm"
+                          >
+                            {addingShare ? "Sending…" : "Invite"}
+                          </Button>
+                        </form>
+                        {activeProject.shares && activeProject.shares.length > 0 && (
+                          <div className="space-y-2">
+                            {activeProject.shares.map((share) => (
+                              <div
+                                key={share.id}
+                                className="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3"
+                              >
+                                <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-gray-200 text-xs font-semibold text-gray-600">
+                                  {share.user_email?.[0]?.toUpperCase() ?? "?"}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-sm text-gray-800">
+                                    {share.user_email}
+                                  </p>
+                                </div>
+                                <select
+                                  value={share.permission}
+                                  onChange={(e) =>
+                                    void handleUpdateSharePermission(
+                                      share.id,
+                                      e.target.value as SharePermission,
+                                    )
+                                  }
+                                  disabled={updatingShareId === share.id}
+                                  className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 focus:outline-none focus:ring-2 focus:ring-violet-300"
+                                >
+                                  <option value="viewer">Viewer</option>
+                                  <option value="editor">Editor</option>
+                                </select>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleRemoveShare(share.id)}
+                                  disabled={removingShareId === share.id}
+                                  className="text-gray-400 hover:text-red-500 transition-colors"
+                                >
+                                  <X className="h-4 w-4" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── Files panel ── */}
+          {activePanel === "files" && (
+            <div className="flex-1 overflow-y-auto px-6 py-6">
+              <div className="mx-auto max-w-3xl">
+                {!activeProject ? (
+                  <div className="rounded-2xl border border-dashed border-gray-200 bg-white p-10 text-center">
+                    <FolderOpen className="mx-auto mb-3 h-10 w-10 text-gray-300" />
+                    <p className="text-sm font-medium text-gray-500">
+                      Select a project from the sidebar to view its files
+                    </p>
+                  </div>
+                ) : (
                   <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-                    <div className="flex items-center justify-between mb-4">
-                      <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-                        <FileText className="h-4 w-4 text-gray-500" /> Files
+                    <div className="mb-4 flex items-center justify-between">
+                      <h2 className="text-sm font-semibold text-gray-900">
+                        {activeProject.name} — Files
                       </h2>
                       <button
                         type="button"
                         onClick={() => projectFileInputRef.current?.click()}
                         disabled={uploadingProjectFile}
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-100 disabled:opacity-50 transition-colors"
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-violet-50 px-3 py-1.5 text-xs font-medium text-violet-600 hover:bg-violet-100 disabled:opacity-50 transition-colors"
                       >
                         <Upload className="h-3.5 w-3.5" />
-                        {uploadingProjectFile ? "Uploading..." : "Upload"}
+                        {uploadingProjectFile ? "Uploading…" : "Upload file"}
                       </button>
-                      <input ref={projectFileInputRef} type="file" className="hidden" onChange={handleProjectFileSelected} />
+                      <input
+                        ref={projectFileInputRef}
+                        type="file"
+                        className="hidden"
+                        onChange={handleProjectFileSelected}
+                      />
                     </div>
                     {loadingFiles ? (
-                      <p className="text-sm text-gray-400 animate-pulse">Loading files...</p>
+                      <p className="animate-pulse text-sm text-gray-400">Loading…</p>
                     ) : projectFiles.length === 0 ? (
-                      <div className="rounded-xl border border-dashed border-gray-200 py-8 text-center">
-                        <FileText className="h-8 w-8 text-gray-300 mx-auto mb-2" />
-                        <p className="text-xs text-gray-400">No files uploaded yet</p>
+                      <div className="rounded-xl border border-dashed border-gray-200 py-12 text-center">
+                        <FileText className="mx-auto mb-3 h-10 w-10 text-gray-300" />
+                        <p className="text-sm text-gray-400">No files yet</p>
                       </div>
                     ) : (
                       <div className="space-y-2">
                         {projectFiles.map((file) => (
-                          <div key={file.id} className="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
-                            <FileText className="h-4 w-4 flex-shrink-0 text-gray-400" />
+                          <div
+                            key={file.id}
+                            className="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3"
+                          >
+                            <FileTypeIcon filename={file.filename} className="h-5 w-5 flex-shrink-0" />
                             <div className="min-w-0 flex-1">
-                              <p className="truncate text-sm text-gray-800">{file.filename}</p>
-                              <p className="text-xs text-gray-400">{formatBytes(file.file_size)} · {formatDate(file.created_at)}</p>
+                              <p className="truncate text-sm font-medium text-gray-800">
+                                {file.filename}
+                              </p>
+                              <p className="text-xs text-gray-400">
+                                {formatBytes(file.file_size)} · {formatDate(file.created_at)}
+                              </p>
                             </div>
                             <button
                               type="button"
                               onClick={() => void handleDeleteFile(file.id)}
                               disabled={deletingFileId === file.id}
-                              className="text-gray-400 hover:text-red-500 transition-colors"
+                              className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors"
                             >
                               <Trash2 className="h-4 w-4" />
                             </button>
@@ -1058,210 +1894,111 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
                       </div>
                     )}
                   </div>
-
-                  {/* Sharing card */}
-                  {isProjectOwner && (
-                    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-                      <h2 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                        <UserRound className="h-4 w-4 text-gray-500" /> Sharing
-                      </h2>
-                      <form onSubmit={handleAddShare} className="flex gap-2 mb-4">
-                        <Input
-                          type="email"
-                          value={shareEmail}
-                          onChange={(e) => setShareEmail(e.target.value)}
-                          placeholder="teammate@example.com"
-                          className="flex-1 rounded-xl border-gray-200 text-sm"
-                          required
-                        />
-                        <select
-                          value={sharePermission}
-                          onChange={(e) => setSharePermission(e.target.value as SharePermission)}
-                          className="rounded-xl border border-gray-200 bg-white px-2 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                        >
-                          <option value="viewer">Viewer</option>
-                          <option value="editor">Editor</option>
-                        </select>
-                        <Button disabled={addingShare} className="rounded-xl bg-indigo-600 text-white hover:bg-indigo-500 text-sm whitespace-nowrap">
-                          {addingShare ? "Sending..." : "Invite"}
-                        </Button>
-                      </form>
-                      {activeProject.shares && activeProject.shares.length > 0 && (
-                        <div className="space-y-2">
-                          {activeProject.shares.map((share) => (
-                            <div key={share.id} className="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
-                              <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-gray-200 text-xs font-semibold text-gray-600">
-                                {share.user_email?.[0]?.toUpperCase() ?? "?"}
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <p className="truncate text-sm text-gray-800">{share.user_email}</p>
-                              </div>
-                              <select
-                                value={share.permission}
-                                onChange={(e) => void handleUpdateSharePermission(share.id, e.target.value as SharePermission)}
-                                disabled={updatingShareId === share.id}
-                                className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                              >
-                                <option value="viewer">Viewer</option>
-                                <option value="editor">Editor</option>
-                              </select>
-                              <button
-                                type="button"
-                                onClick={() => void handleRemoveShare(share.id)}
-                                disabled={removingShareId === share.id}
-                                className="text-gray-400 hover:text-red-500 transition-colors"
-                              >
-                                <X className="h-4 w-4" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* ── Files panel ── */}
-        {activePanel === "files" && (
-          <div className="flex-1 overflow-y-auto px-6 py-6">
-            <div className="mx-auto max-w-3xl">
-              {!activeProject ? (
-                <div className="rounded-2xl border border-dashed border-gray-200 bg-white p-10 text-center">
-                  <FolderOpen className="h-10 w-10 text-gray-300 mx-auto mb-3" />
-                  <p className="text-sm font-medium text-gray-500">Select a project from the sidebar to view its files</p>
-                </div>
-              ) : (
+          {/* ── Invitations panel ── */}
+          {activePanel === "invitations" && (
+            <div className="flex-1 overflow-y-auto px-6 py-6">
+              <div className="mx-auto max-w-3xl space-y-4">
+                {/* Accept by token */}
                 <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-                  <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-sm font-semibold text-gray-900">{activeProject.name} — Files</h2>
+                  <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-900">
+                    <Mail className="h-4 w-4 text-gray-500" /> Accept an invitation
+                  </h2>
+                  <form onSubmit={handleAcceptInvitationToken} className="flex gap-2">
+                    <Input
+                      value={manualInvitationToken}
+                      onChange={(e) => setManualInvitationToken(e.target.value)}
+                      placeholder="Paste invitation token…"
+                      className="flex-1 rounded-xl border-gray-200 text-sm"
+                      required
+                    />
+                    <Button
+                      disabled={acceptingToken}
+                      className="whitespace-nowrap rounded-xl bg-violet-600 text-white hover:bg-violet-500 text-sm"
+                    >
+                      {acceptingToken ? "Accepting…" : "Accept"}
+                    </Button>
+                  </form>
+                </div>
+
+                {/* Pending invitations */}
+                <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h2 className="text-sm font-semibold text-gray-900">Pending invitations</h2>
                     <button
                       type="button"
-                      onClick={() => projectFileInputRef.current?.click()}
-                      disabled={uploadingProjectFile}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-100 disabled:opacity-50 transition-colors"
+                      onClick={() => void refreshInvitations()}
+                      className="text-xs text-violet-600 hover:text-violet-800 transition-colors"
                     >
-                      <Upload className="h-3.5 w-3.5" />
-                      {uploadingProjectFile ? "Uploading..." : "Upload file"}
+                      Refresh
                     </button>
-                    <input ref={projectFileInputRef} type="file" className="hidden" onChange={handleProjectFileSelected} />
                   </div>
-                  {loadingFiles ? (
-                    <p className="text-sm text-gray-400 animate-pulse">Loading...</p>
-                  ) : projectFiles.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-gray-200 py-12 text-center">
-                      <FileText className="h-10 w-10 text-gray-300 mx-auto mb-3" />
-                      <p className="text-sm text-gray-400">No files yet</p>
+                  {loadingInvitations ? (
+                    <p className="animate-pulse text-sm text-gray-400">Loading…</p>
+                  ) : invitations.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-gray-200 py-10 text-center">
+                      <Mail className="mx-auto mb-2 h-8 w-8 text-gray-300" />
+                      <p className="text-sm text-gray-400">No pending invitations</p>
                     </div>
                   ) : (
-                    <div className="space-y-2">
-                      {projectFiles.map((file) => (
-                        <div key={file.id} className="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
-                          <FileText className="h-5 w-5 flex-shrink-0 text-indigo-400" />
+                    <div className="space-y-3">
+                      {invitations.map((inv) => (
+                        <div
+                          key={inv.id}
+                          className="flex items-center gap-4 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3"
+                        >
+                          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-violet-100 text-sm font-semibold text-violet-700">
+                            {inv.project?.name?.[0]?.toUpperCase() ?? "P"}
+                          </div>
                           <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-medium text-gray-800">{file.filename}</p>
-                            <p className="text-xs text-gray-400">{formatBytes(file.file_size)} · {formatDate(file.created_at)}</p>
+                            <p className="text-sm font-medium text-gray-800">
+                              {inv.project?.name ?? "Unknown project"}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              Invited by {inv.invited_by ?? "someone"} · {inv.permission}
+                            </p>
                           </div>
                           <button
                             type="button"
-                            onClick={() => void handleDeleteFile(file.id)}
-                            disabled={deletingFileId === file.id}
-                            className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                            onClick={async () => {
+                              setAcceptingToken(true);
+                              try {
+                                await backendApi.acceptInvitationByToken(inv.id);
+                                await Promise.all([refreshProjects(), refreshInvitations()]);
+                                toast.success("Invitation accepted.");
+                              } catch (error) {
+                                toast.error(getApiErrorMessage(error, "Failed to accept."));
+                              } finally {
+                                setAcceptingToken(false);
+                              }
+                            }}
+                            disabled={acceptingToken}
+                            className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-500 disabled:opacity-50 transition-colors"
                           >
-                            <Trash2 className="h-4 w-4" />
+                            Accept
                           </button>
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ── Invitations panel ── */}
-        {activePanel === "invitations" && (
-          <div className="flex-1 overflow-y-auto px-6 py-6">
-            <div className="mx-auto max-w-3xl space-y-4">
-              {/* Accept by token */}
-              <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-                <h2 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                  <Mail className="h-4 w-4 text-gray-500" /> Accept an invitation
-                </h2>
-                <form onSubmit={handleAcceptInvitationToken} className="flex gap-2">
-                  <Input
-                    value={manualInvitationToken}
-                    onChange={(e) => setManualInvitationToken(e.target.value)}
-                    placeholder="Paste invitation token..."
-                    className="flex-1 rounded-xl border-gray-200 text-sm"
-                    required
-                  />
-                  <Button disabled={acceptingToken} className="rounded-xl bg-indigo-600 text-white hover:bg-indigo-500 text-sm whitespace-nowrap">
-                    {acceptingToken ? "Accepting..." : "Accept"}
-                  </Button>
-                </form>
-              </div>
-
-              {/* Pending invitations */}
-              <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-sm font-semibold text-gray-900">Pending invitations</h2>
-                  <button
-                    type="button"
-                    onClick={() => void refreshInvitations()}
-                    className="text-xs text-indigo-600 hover:text-indigo-800 transition-colors"
-                  >
-                    Refresh
-                  </button>
-                </div>
-                {loadingInvitations ? (
-                  <p className="text-sm text-gray-400 animate-pulse">Loading...</p>
-                ) : invitations.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-gray-200 py-10 text-center">
-                    <Mail className="h-8 w-8 text-gray-300 mx-auto mb-2" />
-                    <p className="text-sm text-gray-400">No pending invitations</p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {invitations.map((inv) => (
-                      <div key={inv.id} className="flex items-center gap-4 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
-                        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-indigo-100 text-sm font-semibold text-indigo-700">
-                          {inv.project?.name?.[0]?.toUpperCase() ?? "P"}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-gray-800">{inv.project?.name ?? "Unknown project"}</p>
-                          <p className="text-xs text-gray-500">Invited by {inv.invited_by ?? "someone"} · {inv.permission}</p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            setAcceptingToken(true);
-                            try {
-                              await backendApi.acceptInvitationByToken(inv.id);
-                              await Promise.all([refreshProjects(), refreshInvitations()]);
-                              toast.success("Invitation accepted.");
-                            } catch (error) {
-                              toast.error(getApiErrorMessage(error, "Failed to accept."));
-                            } finally { setAcceptingToken(false); }
-                          }}
-                          disabled={acceptingToken}
-                          className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors"
-                        >
-                          Accept
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             </div>
-          </div>
-        )}
-      </main>
+          )}
+        </main>
+      </div>
+
+      {/* Click-away to close project menu */}
+      {openProjectMenuId && (
+        <div
+          className="fixed inset-0 z-10"
+          onClick={() => setOpenProjectMenuId(null)}
+        />
+      )}
     </div>
   );
 }
