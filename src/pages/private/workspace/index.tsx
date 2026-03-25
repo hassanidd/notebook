@@ -9,17 +9,24 @@ import {
 } from "react";
 import {
   Activity,
+  Bot,
+  ChevronDown,
+  ChevronRight,
   FileText,
   FolderOpen,
   LogOut,
   Mail,
   MessageSquare,
+  MoreHorizontal,
+  Paperclip,
   Plus,
   SendHorizontal,
+  Settings,
   Sparkles,
   Trash2,
   Upload,
   UserRound,
+  X,
 } from "lucide-react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
@@ -61,54 +68,26 @@ function sortChatsByActivity(chats: ChatWithMessages[]): ChatWithMessages[] {
 }
 
 function formatDate(value: string | null): string {
-  if (!value) {
-    return "No date";
-  }
-
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
+  if (!value) return "—";
+  const d = new Date(value);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return "Just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(d);
 }
 
 function formatBytes(bytes: number): string {
-  if (bytes < 1024) {
-    return bytes + " B";
-  }
-
+  if (bytes < 1024) return bytes + " B";
   const kb = bytes / 1024;
-  if (kb < 1024) {
-    return kb.toFixed(1) + " KB";
-  }
-
-  const mb = kb / 1024;
-  return mb.toFixed(1) + " MB";
+  if (kb < 1024) return kb.toFixed(1) + " KB";
+  return (kb / 1024).toFixed(1) + " MB";
 }
 
-function panelClass(active: boolean): string {
-  return active
-    ? "inline-flex items-center gap-1.5 rounded-lg border border-blue-600 bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white shadow-[0_10px_22px_rgba(37,99,235,0.32)]"
-    : "inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-600 transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:text-blue-700 hover:shadow-sm";
-}
-
-function panelTitle(panel: WorkspacePanel): string {
-  if (panel === "chat") {
-    return "Chat";
-  }
-  if (panel === "project") {
-    return "Projects";
-  }
-  if (panel === "files") {
-    return "Files";
-  }
-  return "Invitations";
-}
-
-type WorkspacePageProps = {
-  panel: WorkspacePanel;
-};
+type WorkspacePageProps = { panel: WorkspacePanel };
 
 export default function WorkspacePage({ panel }: WorkspacePageProps) {
   const navigate = useNavigate();
@@ -117,24 +96,22 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
   const [loadingWorkspace, setLoadingWorkspace] = useState(true);
   const [loadingChat, setLoadingChat] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
-
   const [creatingProject, setCreatingProject] = useState(false);
   const [savingProject, setSavingProject] = useState(false);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [deletingChatId, setDeletingChatId] = useState<string | null>(null);
-
   const [addingShare, setAddingShare] = useState(false);
   const [updatingShareId, setUpdatingShareId] = useState<string | null>(null);
   const [removingShareId, setRemovingShareId] = useState<string | null>(null);
-
   const [loadingInvitations, setLoadingInvitations] = useState(false);
   const [acceptingToken, setAcceptingToken] = useState(false);
-
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [uploadingProjectFile, setUploadingProjectFile] = useState(false);
   const [uploadingChatFile, setUploadingChatFile] = useState(false);
   const [confirmingFileId, setConfirmingFileId] = useState<string | null>(null);
   const [deletingFileId, setDeletingFileId] = useState<string | null>(null);
+  const [showNewProject, setShowNewProject] = useState(false);
+  const [projectsExpanded, setProjectsExpanded] = useState(true);
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [chats, setChats] = useState<ChatWithMessages[]>([]);
@@ -144,22 +121,16 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
 
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [projectFilter, setProjectFilter] = useState<string>(ALL_PROJECTS_FILTER);
-
   const [messageInput, setMessageInput] = useState("");
-
   const [projectNameInput, setProjectNameInput] = useState("");
   const [projectDescriptionInput, setProjectDescriptionInput] = useState("");
-
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editInstructions, setEditInstructions] = useState("");
   const [editArchived, setEditArchived] = useState(false);
   const [editFavorite, setEditFavorite] = useState(false);
-
   const [shareEmail, setShareEmail] = useState("");
-  const [sharePermission, setSharePermission] =
-    useState<SharePermission>("viewer");
-
+  const [sharePermission, setSharePermission] = useState<SharePermission>("viewer");
   const [manualInvitationToken, setManualInvitationToken] = useState("");
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -173,125 +144,65 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
   const activePanel = panel;
 
   const navigateToPanel = useCallback(
-    (panel: WorkspacePanel) => {
-      if (panel === activePanel) {
-        return;
-      }
-      navigate(PANEL_PATHS[panel]);
-    },
+    (p: WorkspacePanel) => { if (p !== activePanel) navigate(PANEL_PATHS[p]); },
     [activePanel, navigate],
   );
 
-  const activeProject = useMemo(() => {
-    if (projectFilter === ALL_PROJECTS_FILTER) {
-      return null;
-    }
-
-    return projects.find((project) => project.id === projectFilter) ?? null;
-  }, [projectFilter, projects]);
-
-  const isProjectOwner = Boolean(
-    activeProject && user && activeProject.owner_id === user.id,
+  const activeProject = useMemo(
+    () => projectFilter === ALL_PROJECTS_FILTER ? null : projects.find((p) => p.id === projectFilter) ?? null,
+    [projectFilter, projects],
   );
 
-  const filteredChats = useMemo(() => {
-    if (projectFilter === ALL_PROJECTS_FILTER) {
-      return chats;
-    }
+  const isProjectOwner = Boolean(activeProject && user && activeProject.owner_id === user.id);
 
-    return chats.filter((chat) => chat.project_id === projectFilter);
-  }, [chats, projectFilter]);
-
-  const workspaceHighlights = useMemo(
-    () => [
-      {
-        label: "Projects",
-        value: projects.length,
-        icon: FolderOpen,
-      },
-      {
-        label: "Chats",
-        value: chats.length,
-        icon: MessageSquare,
-      },
-      {
-        label: "Invites",
-        value: invitations.length,
-        icon: Mail,
-      },
-    ],
-    [chats.length, invitations.length, projects.length],
+  const filteredChats = useMemo(
+    () => projectFilter === ALL_PROJECTS_FILTER ? chats : chats.filter((c) => c.project_id === projectFilter),
+    [chats, projectFilter],
   );
 
   const refreshProjects = useCallback(async () => {
-    const projectData = await backendApi.listProjects();
-    setProjects(projectData);
+    const data = await backendApi.listProjects();
+    setProjects(data);
   }, []);
 
   const refreshChats = useCallback(async () => {
-    const chatData = await backendApi.listChats();
-    setChats(sortChatsByActivity(chatData));
-
-    if (chatData.length === 0) {
-      setActiveChatId(null);
-      setMessages([]);
-      return;
-    }
-
-    if (activeChatId && chatData.some((chat) => chat.id === activeChatId)) {
-      return;
-    }
-
-    setActiveChatId(chatData[0].id);
+    const data = await backendApi.listChats();
+    setChats(sortChatsByActivity(data));
+    if (data.length === 0) { setActiveChatId(null); setMessages([]); return; }
+    if (activeChatId && data.some((c) => c.id === activeChatId)) return;
+    setActiveChatId(data[0].id);
   }, [activeChatId]);
   const refreshChatsRef = useRef(refreshChats);
 
   const refreshInvitations = useCallback(async () => {
     setLoadingInvitations(true);
-    try {
-      const invitationData = await backendApi.listPendingInvitations();
-      setInvitations(invitationData);
-    } finally {
-      setLoadingInvitations(false);
-    }
+    try { setInvitations(await backendApi.listPendingInvitations()); }
+    finally { setLoadingInvitations(false); }
   }, []);
 
   const refreshProjectFiles = useCallback(async (projectId: string) => {
     setLoadingFiles(true);
-    try {
-      const files = await backendApi.listProjectFiles(projectId);
-      setProjectFiles(files);
-    } finally {
-      setLoadingFiles(false);
-    }
+    try { setProjectFiles(await backendApi.listProjectFiles(projectId)); }
+    finally { setLoadingFiles(false); }
   }, []);
 
   const refreshSingleProject = useCallback(async (projectId: string) => {
-    const freshProject = await backendApi.getProject(projectId);
-    setProjects((previous) =>
-      previous.map((project) =>
-        project.id === freshProject.id ? freshProject : project,
-      ),
-    );
+    const fresh = await backendApi.getProject(projectId);
+    setProjects((prev) => prev.map((p) => (p.id === fresh.id ? fresh : p)));
   }, []);
 
   const loadWorkspace = useCallback(async () => {
     setLoadingWorkspace(true);
-
     try {
       const [projectData, chatData, invitationData] = await Promise.all([
         backendApi.listProjects(),
         backendApi.listChats(),
         backendApi.listPendingInvitations(),
       ]);
-
       setProjects(projectData);
       setChats(sortChatsByActivity(chatData));
       setInvitations(invitationData);
-
-      if (chatData.length > 0) {
-        setActiveChatId(chatData[0].id);
-      }
+      if (chatData.length > 0) setActiveChatId(chatData[0].id);
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Failed to load workspace."));
     } finally {
@@ -299,334 +210,156 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
     }
   }, []);
 
-  useEffect(() => {
-    void loadWorkspace();
-  }, [loadWorkspace]);
+  useEffect(() => { void loadWorkspace(); }, [loadWorkspace]);
+  useEffect(() => { activeChatIdRef.current = activeChatId; }, [activeChatId]);
+  useEffect(() => { projectFilterRef.current = projectFilter; }, [projectFilter]);
+  useEffect(() => { sendingMessageRef.current = sendingMessage; }, [sendingMessage]);
+  useEffect(() => { userIdRef.current = user?.id ?? null; }, [user?.id]);
+  useEffect(() => { refreshChatsRef.current = refreshChats; }, [refreshChats]);
 
   useEffect(() => {
-    activeChatIdRef.current = activeChatId;
-  }, [activeChatId]);
-
-  useEffect(() => {
-    projectFilterRef.current = projectFilter;
-  }, [projectFilter]);
-
-  useEffect(() => {
-    sendingMessageRef.current = sendingMessage;
-  }, [sendingMessage]);
-
-  useEffect(() => {
-    userIdRef.current = user?.id ?? null;
-  }, [user?.id]);
-
-  useEffect(() => {
-    refreshChatsRef.current = refreshChats;
-  }, [refreshChats]);
-
-  useEffect(() => {
-    if (!user?.id) {
-      return;
-    }
-
+    if (!user?.id) return;
     let socket: WebSocket | null = null;
     let reconnectTimer: number | null = null;
     let pingTimer: number | null = null;
     let closedByCleanup = false;
 
     function clearTimers() {
-      if (reconnectTimer !== null) {
-        window.clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-      }
-      if (pingTimer !== null) {
-        window.clearInterval(pingTimer);
-        pingTimer = null;
-      }
+      if (reconnectTimer !== null) { window.clearTimeout(reconnectTimer); reconnectTimer = null; }
+      if (pingTimer !== null) { window.clearInterval(pingTimer); pingTimer = null; }
     }
 
     function connect() {
       let socketUrl: string;
-      try {
-        socketUrl = backendApi.getChatRealtimeSocketUrl();
-      } catch {
-        return;
-      }
-
+      try { socketUrl = backendApi.getChatRealtimeSocketUrl(); } catch { return; }
       socket = new WebSocket(socketUrl);
-
       socket.onopen = () => {
         pingTimer = window.setInterval(() => {
-          if (socket?.readyState === WebSocket.OPEN) {
-            socket.send("ping");
-          }
+          if (socket?.readyState === WebSocket.OPEN) socket.send("ping");
         }, 25000);
       };
-
       socket.onmessage = (event) => {
         let payload: ChatRealtimeEvent;
-        try {
-          payload = JSON.parse(event.data) as ChatRealtimeEvent;
-        } catch {
-          return;
-        }
-
-        if (payload.type === "pong" || payload.type === "ws_connected") {
-          return;
-        }
-
+        try { payload = JSON.parse(event.data) as ChatRealtimeEvent; } catch { return; }
+        if (payload.type === "pong" || payload.type === "ws_connected") return;
         if (payload.type === "chat_created") {
-          if (payload.actor_user_id === userIdRef.current) {
-            return;
-          }
-
-          const currentProjectFilter = projectFilterRef.current;
-          if (
-            currentProjectFilter !== ALL_PROJECTS_FILTER &&
-            payload.chat.project_id !== currentProjectFilter
-          ) {
-            return;
-          }
-
+          if (payload.actor_user_id === userIdRef.current) return;
+          const f = projectFilterRef.current;
+          if (f !== ALL_PROJECTS_FILTER && payload.chat.project_id !== f) return;
           void refreshChatsRef.current();
           return;
         }
-
         if (payload.type === "chat_deleted") {
-          setChats((previous) =>
-            previous.filter((chat) => chat.id !== payload.chat_id),
-          );
-
-          if (activeChatIdRef.current === payload.chat_id) {
-            setActiveChatId(null);
-            setMessages([]);
-          }
+          setChats((prev) => prev.filter((c) => c.id !== payload.chat_id));
+          if (activeChatIdRef.current === payload.chat_id) { setActiveChatId(null); setMessages([]); }
           return;
         }
-
         if (payload.type === "message_created") {
-          if (payload.actor_user_id && payload.actor_user_id === userIdRef.current) {
-            return;
-          }
-
+          if (payload.actor_user_id && payload.actor_user_id === userIdRef.current) return;
           void refreshChatsRef.current();
-
-          if (activeChatIdRef.current !== payload.chat_id) {
-            return;
-          }
-
-          const streamingId =
-            REALTIME_STREAMING_MESSAGE_PREFIX + "-" + payload.chat_id;
-          setMessages((previous) => {
-            if (previous.some((message) => message.id === payload.message.id)) {
-              return previous;
-            }
-            const withoutStreaming = previous.filter(
-              (message) => message.id !== streamingId,
-            );
-            const nextMessages = [...withoutStreaming, payload.message];
-
-            if (payload.message.role !== "user") {
-              return nextMessages;
-            }
-
-            return [
-              ...nextMessages,
-              {
-                id: streamingId,
-                chat_id: payload.chat_id,
-                sender: null,
-                role: "assistant",
-                content: "",
-                created_at: new Date().toISOString(),
-              },
-            ];
+          if (activeChatIdRef.current !== payload.chat_id) return;
+          const streamingId = REALTIME_STREAMING_MESSAGE_PREFIX + "-" + payload.chat_id;
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === payload.message.id)) return prev;
+            const without = prev.filter((m) => m.id !== streamingId);
+            const next = [...without, payload.message];
+            if (payload.message.role !== "user") return next;
+            return [...next, { id: streamingId, chat_id: payload.chat_id, sender: null, role: "assistant", content: "", created_at: new Date().toISOString() }];
           });
           return;
         }
-
         if (payload.type === "assistant_chunk") {
-          if (payload.actor_user_id && payload.actor_user_id === userIdRef.current) {
-            return;
-          }
-          if (activeChatIdRef.current !== payload.chat_id) {
-            return;
-          }
-
-          const streamingId =
-            REALTIME_STREAMING_MESSAGE_PREFIX + "-" + payload.chat_id;
-          setMessages((previous) => {
-            const copy = [...previous];
-            const index = copy.findIndex((message) => message.id === streamingId);
-
-            if (index === -1) {
-              copy.push({
-                id: streamingId,
-                chat_id: payload.chat_id,
-                sender: null,
-                role: "assistant",
-                content: payload.content,
-                created_at: new Date().toISOString(),
-              });
+          if (payload.actor_user_id && payload.actor_user_id === userIdRef.current) return;
+          if (activeChatIdRef.current !== payload.chat_id) return;
+          const streamingId = REALTIME_STREAMING_MESSAGE_PREFIX + "-" + payload.chat_id;
+          setMessages((prev) => {
+            const copy = [...prev];
+            const idx = copy.findIndex((m) => m.id === streamingId);
+            if (idx === -1) {
+              copy.push({ id: streamingId, chat_id: payload.chat_id, sender: null, role: "assistant", content: payload.content, created_at: new Date().toISOString() });
               return copy;
             }
-
-            copy[index] = {
-              ...copy[index],
-              content: copy[index].content + payload.content,
-            };
+            copy[idx] = { ...copy[idx], content: copy[idx].content + payload.content };
             return copy;
           });
           return;
         }
-
         if (payload.type === "assistant_done") {
-          if (payload.actor_user_id && payload.actor_user_id === userIdRef.current) {
-            return;
-          }
-
+          if (payload.actor_user_id && payload.actor_user_id === userIdRef.current) return;
           void refreshChatsRef.current();
-
-          if (
-            activeChatIdRef.current === payload.chat_id &&
-            !sendingMessageRef.current
-          ) {
-            void backendApi
-              .getChat(payload.chat_id)
-              .then((chat) => {
-                if (activeChatIdRef.current === payload.chat_id) {
-                  setMessages(chat.messages);
-                }
-              })
-              .catch(() => {});
+          if (activeChatIdRef.current === payload.chat_id && !sendingMessageRef.current) {
+            void backendApi.getChat(payload.chat_id).then((chat) => {
+              if (activeChatIdRef.current === payload.chat_id) setMessages(chat.messages);
+            }).catch(() => {});
           }
         }
       };
-
       socket.onclose = () => {
         clearTimers();
-        if (closedByCleanup) {
-          return;
-        }
-        reconnectTimer = window.setTimeout(() => {
-          connect();
-        }, 2000);
+        if (!closedByCleanup) reconnectTimer = window.setTimeout(connect, 2000);
       };
-
-      socket.onerror = () => {
-        socket?.close();
-      };
+      socket.onerror = () => { socket?.close(); };
     }
 
     connect();
-
-    return () => {
-      closedByCleanup = true;
-      clearTimers();
-      socket?.close();
-    };
+    return () => { closedByCleanup = true; clearTimers(); socket?.close(); };
   }, [user?.id]);
 
   useEffect(() => {
-    if (!activeChatId) {
-      if (!sendingMessage) {
-        setMessages([]);
-      }
-      return;
-    }
-
-    if (sendingMessage) {
-      return;
-    }
-
+    if (!activeChatId) { if (!sendingMessage) setMessages([]); return; }
+    if (sendingMessage) return;
     const chatId = activeChatId;
-
     let cancelled = false;
-
-    async function loadActiveChat() {
+    async function load() {
       setLoadingChat(true);
-
       try {
         const chat = await backendApi.getChat(chatId);
-        if (!cancelled) {
-          setMessages(chat.messages);
-        }
+        if (!cancelled) setMessages(chat.messages);
       } catch (error) {
-        if (!cancelled) {
-          toast.error(getApiErrorMessage(error, "Failed to load chat."));
-        }
+        if (!cancelled) toast.error(getApiErrorMessage(error, "Failed to load chat."));
       } finally {
-        if (!cancelled) {
-          setLoadingChat(false);
-        }
+        if (!cancelled) setLoadingChat(false);
       }
     }
-
-    void loadActiveChat();
-
-    return () => {
-      cancelled = true;
-    };
+    void load();
+    return () => { cancelled = true; };
   }, [activeChatId, sendingMessage]);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
   useEffect(() => {
     if (!activeProject) {
-      setEditName("");
-      setEditDescription("");
-      setEditInstructions("");
-      setEditArchived(false);
-      setEditFavorite(false);
-      setProjectFiles([]);
+      setEditName(""); setEditDescription(""); setEditInstructions(""); setEditArchived(false); setEditFavorite(false); setProjectFiles([]);
       return;
     }
-
     setEditName(activeProject.name);
     setEditDescription(activeProject.description ?? "");
     setEditInstructions(activeProject.instructions ?? "");
     setEditArchived(Boolean(activeProject.is_archived));
     setEditFavorite(Boolean(activeProject.is_favorite));
-
     void refreshProjectFiles(activeProject.id);
   }, [activeProject, refreshProjectFiles]);
 
   async function handleCreateProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
     const name = projectNameInput.trim();
-    if (!name) {
-      return;
-    }
-
+    if (!name) return;
     setCreatingProject(true);
     try {
-      const project = await backendApi.createProject({
-        name,
-        description: projectDescriptionInput.trim() || undefined,
-      });
-
-      setProjects((previous) => [project, ...previous]);
+      const project = await backendApi.createProject({ name, description: projectDescriptionInput.trim() || undefined });
+      setProjects((prev) => [project, ...prev]);
       setProjectFilter(project.id);
       navigateToPanel("project");
-      setProjectNameInput("");
-      setProjectDescriptionInput("");
+      setProjectNameInput(""); setProjectDescriptionInput(""); setShowNewProject(false);
       toast.success("Project created.");
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Failed to create project."));
-    } finally {
-      setCreatingProject(false);
-    }
+    } finally { setCreatingProject(false); }
   }
 
   async function handleSaveProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
-    if (!activeProject) {
-      return;
-    }
-
+    if (!activeProject) return;
     setSavingProject(true);
     try {
       const updated = await backendApi.updateProject(activeProject.id, {
@@ -636,139 +369,74 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
         is_archived: editArchived,
         is_favorite: editFavorite,
       });
-
-      setProjects((previous) =>
-        previous.map((project) =>
-          project.id === updated.id ? updated : project,
-        ),
-      );
+      setProjects((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
       toast.success("Project saved.");
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Failed to save project."));
-    } finally {
-      setSavingProject(false);
-    }
+    } finally { setSavingProject(false); }
   }
 
   async function handleDeleteProjectById(project: Project) {
-    const shouldDelete = window.confirm("Delete project '" + project.name + "'?");
-    if (!shouldDelete) {
-      return;
-    }
-
+    if (!window.confirm(`Delete "${project.name}"?`)) return;
     setDeletingProjectId(project.id);
     try {
       await backendApi.deleteProject(project.id);
       toast.success("Project deleted.");
-
-      if (projectFilter === project.id) {
-        setProjectFilter(ALL_PROJECTS_FILTER);
-        navigateToPanel("chat");
-      }
-
+      if (projectFilter === project.id) { setProjectFilter(ALL_PROJECTS_FILTER); navigateToPanel("chat"); }
       await Promise.all([refreshProjects(), refreshChats()]);
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Failed to delete project."));
-    } finally {
-      setDeletingProjectId(null);
-    }
+    } finally { setDeletingProjectId(null); }
   }
 
   async function handleDeleteProject() {
-    if (!activeProject) {
-      return;
-    }
-
-    await handleDeleteProjectById(activeProject);
+    if (activeProject) await handleDeleteProjectById(activeProject);
   }
 
   async function handleDeleteChat(chat: ChatWithMessages) {
-    if (sendingMessage) {
-      toast.error("Wait for the current response to finish before deleting a chat.");
-      return;
-    }
-
-    const shouldDelete = window.confirm("Delete chat '" + chat.title + "'?");
-    if (!shouldDelete) {
-      return;
-    }
-
+    if (sendingMessage) { toast.error("Wait for the current response to finish."); return; }
+    if (!window.confirm(`Delete "${chat.title}"?`)) return;
     setDeletingChatId(chat.id);
     try {
       await backendApi.deleteChat(chat.id);
-
-      if (activeChatId === chat.id) {
-        setActiveChatId(null);
-        setMessages([]);
-      }
-
+      if (activeChatId === chat.id) { setActiveChatId(null); setMessages([]); }
       await refreshChats();
       toast.success("Chat deleted.");
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Failed to delete chat."));
-    } finally {
-      setDeletingChatId(null);
-    }
+    } finally { setDeletingChatId(null); }
   }
 
   async function handleAddShare(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
-    if (!activeProject) {
-      return;
-    }
-
+    if (!activeProject) return;
     const email = shareEmail.trim();
-    if (!email) {
-      return;
-    }
-
+    if (!email) return;
     setAddingShare(true);
     try {
-      await backendApi.shareProject(activeProject.id, {
-        user_email: email,
-        permission: sharePermission,
-      });
-      setShareEmail("");
-      setSharePermission("viewer");
+      await backendApi.shareProject(activeProject.id, { user_email: email, permission: sharePermission });
+      setShareEmail(""); setSharePermission("viewer");
       await refreshSingleProject(activeProject.id);
-      toast.success("Share invitation sent.");
+      toast.success("Invitation sent.");
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Failed to share project."));
-    } finally {
-      setAddingShare(false);
-    }
+    } finally { setAddingShare(false); }
   }
 
-  async function handleUpdateSharePermission(
-    shareId: string,
-    permission: SharePermission,
-  ) {
-    if (!activeProject) {
-      return;
-    }
-
+  async function handleUpdateSharePermission(shareId: string, permission: SharePermission) {
+    if (!activeProject) return;
     setUpdatingShareId(shareId);
     try {
-      await backendApi.updateProjectSharePermission(
-        activeProject.id,
-        shareId,
-        permission,
-      );
+      await backendApi.updateProjectSharePermission(activeProject.id, shareId, permission);
       await refreshSingleProject(activeProject.id);
       toast.success("Permission updated.");
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Failed to update permission."));
-    } finally {
-      setUpdatingShareId(null);
-    }
+    } finally { setUpdatingShareId(null); }
   }
 
   async function handleRemoveShare(shareId: string) {
-    if (!activeProject) {
-      return;
-    }
-
+    if (!activeProject) return;
     setRemovingShareId(shareId);
     try {
       await backendApi.deleteProjectShare(activeProject.id, shareId);
@@ -776,19 +444,13 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
       toast.success("Share removed.");
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Failed to remove share."));
-    } finally {
-      setRemovingShareId(null);
-    }
+    } finally { setRemovingShareId(null); }
   }
 
   async function handleAcceptInvitationToken(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
     const token = manualInvitationToken.trim();
-    if (!token) {
-      return;
-    }
-
+    if (!token) return;
     setAcceptingToken(true);
     try {
       await backendApi.acceptInvitationByToken(token);
@@ -797,79 +459,56 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
       toast.success("Invitation accepted.");
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Failed to accept invitation."));
-    } finally {
-      setAcceptingToken(false);
-    }
+    } finally { setAcceptingToken(false); }
   }
 
   async function handleProjectFileSelected(event: ChangeEvent<HTMLInputElement>) {
+    if (!activeProject) return;
     const file = event.target.files?.[0];
+    if (!file) return;
     event.target.value = "";
-
-    if (!file || !activeProject) {
-      return;
-    }
-
     setUploadingProjectFile(true);
     try {
-      const uploaded = await backendApi.uploadProjectFile(activeProject.id, file);
-      toast.success("Uploaded " + uploaded.filename + ".");
+      const result = await backendApi.uploadProjectFile(activeProject.id, file);
+      setConfirmingFileId(result.id);
+      await backendApi.confirmFileUpload(result.id);
+      setConfirmingFileId(null);
       await refreshProjectFiles(activeProject.id);
+      toast.success("File uploaded.");
     } catch (error) {
+      setConfirmingFileId(null);
       toast.error(getApiErrorMessage(error, "Failed to upload file."));
-    } finally {
-      setUploadingProjectFile(false);
-    }
+    } finally { setUploadingProjectFile(false); }
   }
 
   async function handleChatFileSelected(event: ChangeEvent<HTMLInputElement>) {
+    if (!activeChatId) return;
     const file = event.target.files?.[0];
+    if (!file) return;
     event.target.value = "";
-
-    if (!file || !activeChatId) {
-      return;
-    }
-
     setUploadingChatFile(true);
     try {
-      const uploaded = await backendApi.uploadChatFile(activeChatId, file);
-      await backendApi.confirmFileUpload(uploaded.id);
-      toast.success("Chat file uploaded and queued.");
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, "Failed to upload chat file."));
-    } finally {
-      setUploadingChatFile(false);
-    }
-  }
-
-  async function handleConfirmFile(fileId: string) {
-    setConfirmingFileId(fileId);
-    try {
-      await backendApi.confirmFileUpload(fileId);
-      if (activeProject) {
-        await refreshProjectFiles(activeProject.id);
-      }
-      toast.success("File processing started.");
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, "Failed to confirm file."));
-    } finally {
+      const result = await backendApi.uploadChatFile(activeChatId, file);
+      setConfirmingFileId(result.id);
+      await backendApi.confirmFileUpload(result.id);
       setConfirmingFileId(null);
-    }
+      toast.success("File attached to chat.");
+    } catch (error) {
+      setConfirmingFileId(null);
+      toast.error(getApiErrorMessage(error, "Failed to upload file."));
+    } finally { setUploadingChatFile(false); }
   }
 
   async function handleDeleteFile(fileId: string) {
+    if (!window.confirm("Delete this file?")) return;
     setDeletingFileId(fileId);
     try {
       await backendApi.deleteFile(fileId);
-      if (activeProject) {
-        await refreshProjectFiles(activeProject.id);
-      }
+      setProjectFiles((prev) => prev.filter((f) => f.id !== fileId));
       toast.success("File deleted.");
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Failed to delete file."));
-    } finally {
-      setDeletingFileId(null);
-    }
+    } finally { setDeletingFileId(null); }
   }
 
   function handleStartNewChat() {
@@ -880,963 +519,749 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
 
   async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
     const content = messageInput.trim();
-    if (!content || sendingMessage) {
-      return;
-    }
-
+    if (!content) return;
     setSendingMessage(true);
     setMessageInput("");
 
-    const userMessage: ChatMessage = {
+    const tempUserMsg: ChatMessage = {
       id: "local-user-" + Date.now(),
-      chat_id: activeChatId ?? "pending-chat",
-      sender: null,
+      chat_id: activeChatId ?? "",
+      sender: user ? { id: user.id, email: user.email, first_name: user.first_name, last_name: user.last_name } : null,
       role: "user",
       content,
       created_at: new Date().toISOString(),
     };
 
-    const assistantMessage: ChatMessage = {
+    const streamingMsg: ChatMessage = {
       id: STREAMING_MESSAGE_ID,
-      chat_id: activeChatId ?? "pending-chat",
+      chat_id: activeChatId ?? "",
       sender: null,
       role: "assistant",
       content: "",
       created_at: new Date().toISOString(),
     };
 
-    setMessages((previous) => [...previous, userMessage, assistantMessage]);
-
-    let resolvedChatId = activeChatId;
+    setMessages((prev) => [...prev, tempUserMsg, streamingMsg]);
 
     try {
-      const nextChatId = await backendApi.sendChatMessage(
+      const newChatId = await backendApi.sendChatMessage(
+        { chat_id: activeChatId ?? undefined, project_id: projectFilter !== ALL_PROJECTS_FILTER ? projectFilter : undefined, message: content },
         {
-          message: content,
-          chat_id: activeChatId ?? undefined,
-          project_id:
-            projectFilter === ALL_PROJECTS_FILTER ? undefined : projectFilter,
-        },
-        {
-          onChatId: (chatId) => {
-            resolvedChatId = chatId;
-            setActiveChatId(chatId);
-          },
+          onChatId: (id) => { if (!activeChatId) setActiveChatId(id); },
           onChunk: (chunk) => {
-            setMessages((previous) => {
-              const copy = [...previous];
-              const index = copy.findIndex(
-                (message) => message.id === STREAMING_MESSAGE_ID,
-              );
-
-              if (index === -1) {
-                copy.push({
-                  id: STREAMING_MESSAGE_ID,
-                  chat_id: resolvedChatId ?? "pending-chat",
-                  sender: null,
-                  role: "assistant",
-                  content: chunk,
-                  created_at: new Date().toISOString(),
-                });
-                return copy;
-              }
-
-              copy[index] = {
-                ...copy[index],
-                content: copy[index].content + chunk,
-              };
-
-              return copy;
-            });
+            setMessages((prev) => prev.map((m) => m.id === STREAMING_MESSAGE_ID ? { ...m, content: m.content + chunk } : m));
           },
+          onDone: () => {},
         },
       );
-
-      if (nextChatId) {
-        resolvedChatId = nextChatId;
-      }
-
+      if (newChatId) setActiveChatId(newChatId);
       await refreshChats();
-
-      if (resolvedChatId) {
-        const chat = await backendApi.getChat(resolvedChatId);
+      if (newChatId ?? activeChatId) {
+        const chat = await backendApi.getChat(newChatId ?? activeChatId!);
         setMessages(chat.messages);
       }
     } catch (error) {
-      setMessages((previous) =>
-        previous.filter((message) => message.id !== STREAMING_MESSAGE_ID),
-      );
+      setMessages((prev) => prev.filter((m) => m.id !== STREAMING_MESSAGE_ID && m.id !== tempUserMsg.id));
       toast.error(getApiErrorMessage(error, "Failed to send message."));
-    } finally {
-      setSendingMessage(false);
-    }
+    } finally { setSendingMessage(false); }
   }
 
-  async function handleSignOut() {
-    await backendApi.logout();
+  function handleSignOut() {
+    backendApi.signOut();
     navigate("/auth", { replace: true });
   }
 
+  const navItems = [
+    { key: "chat" as WorkspacePanel, label: "Chat", icon: MessageSquare },
+    { key: "project" as WorkspacePanel, label: "Projects", icon: FolderOpen },
+    { key: "files" as WorkspacePanel, label: "Files", icon: FileText },
+    { key: "invitations" as WorkspacePanel, label: "Invitations", icon: Mail, badge: invitations.length || undefined },
+  ];
+
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,#dbeafe_0%,transparent_38%),radial-gradient(circle_at_85%_2%,#fde68a_0%,transparent_32%),linear-gradient(180deg,#f8fafc_0%,#eef2ff_100%)] p-4 sm:p-6">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(rgba(51,65,85,0.06)_1px,transparent_1px)] bg-[size:16px_16px] opacity-35" />
-      <div className="pointer-events-none absolute -top-28 -left-20 h-72 w-72 rounded-full bg-blue-200/35 blur-3xl animate-[drift_17s_ease-in-out_infinite]" />
-      <div className="pointer-events-none absolute right-[-90px] bottom-[-90px] h-80 w-80 rounded-full bg-amber-200/35 blur-3xl animate-[drift_20s_ease-in-out_infinite]" />
-
-      <div className="relative mx-auto flex w-full max-w-[1500px] flex-col gap-4">
-        <nav className="sticky top-2 z-40 rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 shadow-[0_16px_34px_rgba(15,23,42,0.12)] backdrop-blur-xl animate-[riseIn_400ms_ease-out] sm:px-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="inline-flex items-center gap-2 rounded-xl border border-slate-900 bg-slate-900 px-3 py-1.5 shadow-sm">
-              <Sparkles className="h-4 w-4 text-amber-200" />
-              <div>
-                <p className="text-[10px] font-semibold tracking-[0.16em] text-blue-200 uppercase">
-                  FMate
-                </p>
-                <p className="text-sm font-semibold text-white">
-                  {panelTitle(activePanel)}
-                </p>
-              </div>
-            </div>
-
-            <div className="hidden flex-wrap items-center gap-2 lg:flex">
-              <button
-                type="button"
-                className={panelClass(activePanel === "chat")}
-                onClick={() => navigateToPanel("chat")}
-              >
-                <MessageSquare className="h-3.5 w-3.5" />
-                Chat
-              </button>
-              <button
-                type="button"
-                className={panelClass(activePanel === "project")}
-                onClick={() => navigateToPanel("project")}
-              >
-                <FolderOpen className="h-3.5 w-3.5" />
-                Projects
-              </button>
-              <button
-                type="button"
-                className={panelClass(activePanel === "files")}
-                onClick={() => navigateToPanel("files")}
-              >
-                <FileText className="h-3.5 w-3.5" />
-                Files
-              </button>
-              <button
-                type="button"
-                className={panelClass(activePanel === "invitations")}
-                onClick={() => navigateToPanel("invitations")}
-              >
-                <Mail className="h-3.5 w-3.5" />
-                Invitations
-              </button>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700">
-                <UserRound className="h-4 w-4 text-slate-500" />
-                {user ? user.first_name + " " + user.last_name : "User"}
-              </div>
-              <Button
-                variant="outline"
-                onClick={handleSignOut}
-                className="rounded-xl border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-              >
-                <LogOut className="h-4 w-4" />
-                Sign Out
-              </Button>
-            </div>
+    <div className="flex h-screen overflow-hidden bg-gray-50">
+      {/* ── Sidebar ── */}
+      <aside className="flex w-64 flex-shrink-0 flex-col bg-gray-950 text-gray-100 border-r border-gray-800">
+        {/* Brand */}
+        <div className="flex items-center gap-2.5 px-4 py-4 border-b border-gray-800">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 shadow-lg shadow-indigo-900/40">
+            <Sparkles className="h-4 w-4 text-white" />
           </div>
+          <span className="text-sm font-semibold tracking-tight text-white">FMate</span>
+        </div>
 
-          <div className="mt-3 flex gap-2 overflow-x-auto pb-1 lg:hidden">
-            <button
-              type="button"
-              className={panelClass(activePanel === "chat")}
-              onClick={() => navigateToPanel("chat")}
-            >
-              <MessageSquare className="h-3.5 w-3.5" />
-              Chat
-            </button>
-            <button
-              type="button"
-              className={panelClass(activePanel === "project")}
-              onClick={() => navigateToPanel("project")}
-            >
-              <FolderOpen className="h-3.5 w-3.5" />
-              Projects
-            </button>
-            <button
-              type="button"
-              className={panelClass(activePanel === "files")}
-              onClick={() => navigateToPanel("files")}
-            >
-              <FileText className="h-3.5 w-3.5" />
-              Files
-            </button>
-            <button
-              type="button"
-              className={panelClass(activePanel === "invitations")}
-              onClick={() => navigateToPanel("invitations")}
-            >
-              <Mail className="h-3.5 w-3.5" />
-              Invitations
-            </button>
-          </div>
+        {/* Nav */}
+        <nav className="px-2 py-3 space-y-0.5">
+          {navItems.map(({ key, label, icon: Icon, badge }) => {
+            const active = activePanel === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => navigateToPanel(key)}
+                className={`w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors relative ${
+                  active
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "text-gray-400 hover:bg-gray-800 hover:text-gray-100"
+                }`}
+              >
+                <Icon className="h-4 w-4 flex-shrink-0" />
+                <span className="flex-1 text-left">{label}</span>
+                {badge !== undefined && badge > 0 && (
+                  <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-indigo-500 px-1 text-[10px] font-bold text-white">
+                    {badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </nav>
 
-        <header className="rounded-[28px] border border-blue-900/25 bg-[linear-gradient(135deg,#0f172a_0%,#1d4ed8_65%,#0f172a_100%)] px-5 py-5 shadow-[0_20px_50px_rgba(30,58,138,0.35)] backdrop-blur-xl sm:px-6 animate-[riseIn_500ms_ease-out]">
-          <div>
-            <p className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.22em] text-blue-200 uppercase">
-              <Sparkles className="h-3.5 w-3.5 text-amber-200" />
-              FMate Workspace
-            </p>
-            <h1 className="mt-1 text-xl font-semibold text-white sm:text-3xl [font-family:'Iowan_Old_Style','Palatino_Linotype','Book_Antiqua',Palatino,serif]">
-              {activeProject ? activeProject.name : "All Projects"}
-            </h1>
-            <p className="text-xs text-blue-100 sm:text-sm">
-              {activeProject
-                ? "Project context active"
-                : "Global context active"}
-            </p>
+        <div className="mx-2 my-1 h-px bg-gray-800" />
 
-            <div className="mt-3 flex flex-wrap gap-2">
-              {workspaceHighlights.map((item) => {
-                const Icon = item.icon;
-
-                return (
-                  <div
-                    key={item.label}
-                    className="inline-flex items-center gap-2 rounded-xl border border-blue-200/25 bg-white/12 px-3 py-1.5 text-xs text-blue-50 shadow-sm backdrop-blur"
-                  >
-                    <Icon className="h-3.5 w-3.5 text-amber-200" />
-                    <span className="font-semibold text-white">{item.value}</span>
-                    <span>{item.label}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </header>
-
-        <section className="grid min-h-[78vh] gap-4 lg:grid-cols-[368px_1fr]">
-          <aside className="flex flex-col gap-4 rounded-[28px] border border-slate-900/80 bg-slate-900/95 p-4 text-slate-100 shadow-[0_16px_36px_rgba(15,23,42,0.24)] backdrop-blur-xl animate-[riseIn_650ms_ease-out] lg:sticky lg:top-28 lg:max-h-[calc(100vh-8rem)]">
-            <nav className="space-y-2 rounded-2xl border border-white/10 bg-white/5 p-3 shadow-sm">
-              <p className="text-xs font-semibold tracking-[0.14em] text-slate-300 uppercase">
-                Navigation
-              </p>
-              <div className="grid gap-2">
-                <button
-                  type="button"
-                  className={panelClass(activePanel === "chat")}
-                  onClick={() => navigateToPanel("chat")}
-                >
-                  <MessageSquare className="h-3.5 w-3.5" />
-                  Chat
-                </button>
-                <button
-                  type="button"
-                  className={panelClass(activePanel === "project")}
-                  onClick={() => navigateToPanel("project")}
-                >
-                  <FolderOpen className="h-3.5 w-3.5" />
-                  Projects
-                </button>
-                <button
-                  type="button"
-                  className={panelClass(activePanel === "files")}
-                  onClick={() => navigateToPanel("files")}
-                >
-                  <FileText className="h-3.5 w-3.5" />
-                  Files
-                </button>
-                <button
-                  type="button"
-                  className={panelClass(activePanel === "invitations")}
-                  onClick={() => navigateToPanel("invitations")}
-                >
-                  <Mail className="h-3.5 w-3.5" />
-                  Invitations
-                </button>
-              </div>
-            </nav>
-
-            <form
-              onSubmit={handleCreateProject}
-              className="space-y-3 rounded-2xl border border-white/10 bg-slate-800/70 p-4 shadow-sm"
+        {/* Projects section */}
+        <div className="px-2 py-2">
+          <button
+            type="button"
+            onClick={() => setProjectsExpanded((v) => !v)}
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-semibold tracking-wider text-gray-500 uppercase hover:text-gray-300 transition-colors"
+          >
+            {projectsExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            Projects
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setShowNewProject(true); navigateToPanel("project"); }}
+              className="ml-auto flex h-4 w-4 items-center justify-center rounded hover:bg-gray-700 hover:text-white"
             >
-              <p className="inline-flex items-center gap-2 text-sm font-semibold text-slate-100">
-                <Sparkles className="h-4 w-4 text-blue-300" />
-                Create project
-              </p>
-              <Input
-                value={projectNameInput}
-                onChange={(event) => setProjectNameInput(event.target.value)}
-                placeholder="Project name"
-                className="rounded-xl border-slate-600 bg-slate-900/80 text-slate-100 placeholder:text-slate-400"
-                required
-              />
-              <Textarea
-                value={projectDescriptionInput}
-                onChange={(event) => setProjectDescriptionInput(event.target.value)}
-                placeholder="Description (optional)"
-                className="min-h-18 rounded-xl border-slate-600 bg-slate-900/80 text-slate-100 placeholder:text-slate-400"
-              />
-              <Button
-                className="w-full rounded-xl bg-blue-600 text-white hover:bg-blue-500"
-                disabled={creatingProject}
+              <Plus className="h-3 w-3" />
+            </button>
+          </button>
+
+          {projectsExpanded && (
+            <div className="mt-1 space-y-0.5">
+              <button
+                type="button"
+                onClick={() => setProjectFilter(ALL_PROJECTS_FILTER)}
+                className={`w-full flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors ${
+                  projectFilter === ALL_PROJECTS_FILTER
+                    ? "bg-gray-800 text-gray-100"
+                    : "text-gray-500 hover:bg-gray-800 hover:text-gray-300"
+                }`}
               >
-                <Plus className="h-4 w-4" />
-                {creatingProject ? "Creating..." : "Add Project"}
-              </Button>
-            </form>
+                <Activity className="h-3.5 w-3.5 flex-shrink-0" />
+                <span className="truncate">All conversations</span>
+              </button>
 
-            <div className="space-y-2">
-              <p className="text-sm font-semibold text-slate-100">Project filter</p>
-              <div className="grid gap-2">
-                <button
-                  type="button"
-                  onClick={() => setProjectFilter(ALL_PROJECTS_FILTER)}
-                  className={
-                    projectFilter === ALL_PROJECTS_FILTER
-                      ? "rounded-xl border border-blue-500 bg-blue-600 px-3 py-2 text-left text-sm font-medium text-white shadow-sm"
-                      : "rounded-xl border border-slate-600 bg-slate-800 px-3 py-2 text-left text-sm text-slate-100 transition-all hover:-translate-y-0.5 hover:border-blue-400 hover:shadow-sm"
-                  }
-                >
-                  All conversations
-                </button>
-                {projects.map((project) => {
-                  const canDeleteProject = user?.id === project.owner_id;
-                  const isDeletingProject = deletingProjectId === project.id;
-
-                  return (
-                    <div key={project.id} className="flex items-start gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setProjectFilter(project.id)}
-                        className={
-                          projectFilter === project.id
-                            ? "min-w-0 flex-1 rounded-xl border border-blue-500 bg-blue-600 px-3 py-2 text-left shadow-sm"
-                            : "min-w-0 flex-1 rounded-xl border border-slate-600 bg-slate-800 px-3 py-2 text-left transition-all hover:-translate-y-0.5 hover:border-blue-400 hover:shadow-sm"
-                        }
-                      >
-                        <p
-                          className={
-                            projectFilter === project.id
-                              ? "truncate text-sm font-medium text-white"
-                              : "truncate text-sm font-medium text-slate-100"
-                          }
-                        >
-                          {project.name}
-                        </p>
-                        <p
-                          className={
-                            projectFilter === project.id
-                              ? "mt-1 text-xs text-blue-100"
-                              : "mt-1 text-xs text-slate-300"
-                          }
-                        >
-                          {project.description || "No description"}
-                        </p>
-                      </button>
-
-                      {canDeleteProject && (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="rounded-xl border-slate-600 bg-slate-800 text-slate-100 hover:bg-slate-700"
-                          disabled={isDeletingProject}
-                          onClick={() => void handleDeleteProjectById(project)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          {isDeletingProject ? "..." : "Remove"}
-                        </Button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="flex min-h-0 flex-1 flex-col">
-              <div className="mb-2 flex items-center justify-between">
-                <p className="inline-flex items-center gap-2 text-sm font-semibold text-slate-100">
-                  <Activity className="h-4 w-4 text-blue-300" />
-                  Chats
-                </p>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="rounded-xl border-slate-600 bg-slate-800 text-slate-100 hover:bg-slate-700"
-                  onClick={handleStartNewChat}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  New
-                </Button>
-              </div>
-
-              <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
-                {loadingWorkspace ? (
-                  <p className="text-sm text-slate-300">Loading workspace...</p>
-                ) : filteredChats.length === 0 ? (
-                  <p className="text-sm text-slate-300">No chats yet.</p>
-                ) : (
-                  filteredChats.map((chat) => (
-                    <div key={chat.id} className="flex items-start gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveChatId(chat.id);
-                          navigateToPanel("chat");
-                        }}
-                        className={
-                          activeChatId === chat.id
-                            ? "min-w-0 flex-1 rounded-xl border border-blue-500 bg-blue-600 px-3 py-2 text-left shadow-sm"
-                            : "min-w-0 flex-1 rounded-xl border border-slate-600 bg-slate-800 px-3 py-2 text-left transition-all hover:-translate-y-0.5 hover:border-blue-400 hover:shadow-sm"
-                        }
-                      >
-                        <p
-                          className={
-                            activeChatId === chat.id
-                              ? "truncate text-sm font-medium text-white"
-                              : "truncate text-sm font-medium text-slate-100"
-                          }
-                        >
-                          {chat.title}
-                        </p>
-                        <p
-                          className={
-                            activeChatId === chat.id
-                              ? "mt-1 text-xs text-blue-100"
-                              : "mt-1 text-xs text-slate-300"
-                          }
-                        >
-                          {formatDate(chat.last_message_at)}
-                        </p>
-                      </button>
-
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="rounded-xl border-slate-600 bg-slate-800 text-slate-100 hover:bg-slate-700"
-                        disabled={deletingChatId === chat.id || sendingMessage}
-                        onClick={() => void handleDeleteChat(chat)}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        {deletingChatId === chat.id ? "..." : "Remove"}
-                      </Button>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </aside>
-
-          <section className="flex min-h-0 flex-col rounded-[28px] border border-slate-200 bg-white shadow-[0_22px_52px_rgba(15,23,42,0.12)] backdrop-blur-xl animate-[riseIn_800ms_ease-out]">
-            {activePanel === "chat" && (
-              <>
-                <div className="border-b border-slate-200 bg-[linear-gradient(90deg,#f8fafc,#eff6ff)] px-5 py-4 sm:px-6">
-                  <p className="inline-flex items-center gap-2 text-sm font-semibold text-slate-800">
-                    <MessageSquare className="h-4 w-4 text-blue-600" />
-                    {activeChatId
-                      ? "Conversation"
-                      : "Start a new conversation with your assistant"}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-600">
-                    {activeProject
-                      ? "Project context: " + activeProject.name
-                      : "Project context: global"}
-                  </p>
-                </div>
-
-                <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-[linear-gradient(180deg,#f8fbff,#eef4ff)] px-5 py-5 sm:px-6">
-                  {messages.length === 0 ? (
-                    loadingChat ? (
-                      <p className="text-sm text-slate-500 animate-pulse">
-                        Loading conversation...
-                      </p>
-                    ) : (
-                      <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-500 shadow-sm">
-                        Send your first message to begin.
-                      </div>
-                    )
-                  ) : (
-                    <>
-                      {messages.map((message) => {
-                        const isAssistant = message.role === "assistant";
-                        const isStreamingAssistantPlaceholder =
-                          isAssistant &&
-                          !message.content &&
-                          (message.id === STREAMING_MESSAGE_ID ||
-                            message.id.startsWith(
-                              REALTIME_STREAMING_MESSAGE_PREFIX,
-                            ));
-                        const isCurrentUserMessage =
-                          message.role === "user" &&
-                          (message.id.startsWith("local-user-") ||
-                            (user?.id !== undefined &&
-                              user?.id !== null &&
-                              message.sender?.id === user.id));
-                        const isOtherUserMessage =
-                          message.role === "user" && !isCurrentUserMessage;
-
-                        let senderLabel = "Assistant";
-                        if (isCurrentUserMessage) {
-                          senderLabel = "You";
-                        } else if (isOtherUserMessage) {
-                          const fullName = [
-                            message.sender?.first_name,
-                            message.sender?.last_name,
-                          ]
-                            .filter(Boolean)
-                            .join(" ")
-                            .trim();
-                          senderLabel = fullName || message.sender?.email || "Teammate";
-                        }
-
-                        return (
-                          <article
-                            key={message.id}
-                            className={
-                              isCurrentUserMessage
-                                ? "ml-auto max-w-[86%] rounded-2xl border border-blue-600 bg-[linear-gradient(140deg,#2563eb,#1d4ed8)] px-4 py-3 text-sm leading-6 text-white shadow-[0_14px_26px_rgba(37,99,235,0.3)]"
-                                : isAssistant
-                                  ? "max-w-[86%] rounded-2xl border border-blue-200 bg-white px-4 py-3 text-sm leading-6 text-slate-800 shadow-sm"
-                                  : "max-w-[86%] rounded-2xl border border-indigo-200 bg-indigo-50/70 px-4 py-3 text-sm leading-6 text-slate-800 shadow-sm"
-                            }
-                          >
-                            <p
-                              className={
-                                isCurrentUserMessage
-                                  ? "mb-1 text-[10px] font-semibold tracking-[0.14em] text-blue-100 uppercase"
-                                  : isAssistant
-                                    ? "mb-1 text-[10px] font-semibold tracking-[0.14em] text-blue-700 uppercase"
-                                    : "mb-1 text-[10px] font-semibold tracking-[0.14em] text-indigo-700 uppercase"
-                              }
-                            >
-                              {senderLabel} · {formatDate(message.created_at)}
-                            </p>
-                            {isStreamingAssistantPlaceholder ? (
-                              <span className="inline-flex items-center gap-1 text-slate-500 animate-pulse">
-                                Assistant is typing...
-                              </span>
-                            ) : (
-                              message.content || "..."
-                            )}
-                          </article>
-                        );
-                      })}
-                      {loadingChat && (
-                        <p className="text-xs text-slate-500 animate-pulse">
-                          Syncing messages...
-                        </p>
-                      )}
-                    </>
-                  )}
-
-                  <div ref={messagesEndRef} />
-                </div>
-
-                <form
-                  onSubmit={handleSendMessage}
-                  className="border-t border-slate-200 bg-white px-5 py-4 sm:px-6"
-                >
-                  <div className="mb-3 flex flex-wrap items-center gap-2">
-                    <Button
+              {loadingWorkspace ? (
+                <div className="px-3 py-1 text-xs text-gray-600">Loading...</div>
+              ) : (
+                projects.map((project) => (
+                  <div key={project.id} className="group flex items-center gap-1">
+                    <button
                       type="button"
-                      variant="outline"
-                      size="sm"
-                      className="rounded-xl border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
-                      onClick={() => chatFileInputRef.current?.click()}
-                      disabled={!activeChatId || uploadingChatFile}
+                      onClick={() => setProjectFilter(project.id)}
+                      className={`flex-1 min-w-0 flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors ${
+                        projectFilter === project.id
+                          ? "bg-gray-800 text-gray-100"
+                          : "text-gray-500 hover:bg-gray-800 hover:text-gray-300"
+                      }`}
                     >
-                      <Upload className="h-3.5 w-3.5" />
-                      {uploadingChatFile ? "Uploading..." : "Upload chat file"}
-                    </Button>
-                    <input
-                      ref={chatFileInputRef}
-                      type="file"
-                      className="hidden"
-                      onChange={handleChatFileSelected}
-                    />
-                    {!activeChatId && (
-                      <p className="text-xs text-slate-500">
-                        Start a chat first to attach files.
-                      </p>
+                      <FolderOpen className="h-3.5 w-3.5 flex-shrink-0" />
+                      <span className="truncate">{project.name}</span>
+                    </button>
+                    {user?.id === project.owner_id && (
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteProjectById(project)}
+                        disabled={deletingProjectId === project.id}
+                        className="hidden group-hover:flex h-6 w-6 items-center justify-center rounded text-gray-600 hover:bg-gray-800 hover:text-red-400 transition-colors flex-shrink-0"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
                     )}
                   </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
 
-                  <div className="flex flex-col gap-3 sm:flex-row">
-                    <Textarea
-                      value={messageInput}
-                      onChange={(event) => setMessageInput(event.target.value)}
-                      placeholder="Ask anything about your project..."
-                      className="min-h-24 resize-y rounded-2xl border-blue-200 bg-white shadow-sm focus-visible:ring-blue-200"
-                      required
-                    />
-                    <Button
-                      type="submit"
-                      disabled={sendingMessage || loadingWorkspace}
-                      className="rounded-xl bg-blue-600 px-5 text-white hover:bg-blue-500 sm:self-end"
-                    >
-                      <SendHorizontal className="h-4 w-4" />
-                      {sendingMessage ? "Sending..." : "Send"}
-                    </Button>
-                  </div>
-                </form>
-              </>
+        <div className="mx-2 my-1 h-px bg-gray-800" />
+
+        {/* Chats section */}
+        <div className="flex min-h-0 flex-1 flex-col px-2 py-2">
+          <div className="flex items-center gap-2 px-3 py-1.5">
+            <span className="text-xs font-semibold tracking-wider text-gray-500 uppercase flex-1">Chats</span>
+            <button
+              type="button"
+              onClick={handleStartNewChat}
+              className="flex h-4 w-4 items-center justify-center rounded hover:bg-gray-700 hover:text-white text-gray-500 transition-colors"
+            >
+              <Plus className="h-3 w-3" />
+            </button>
+          </div>
+
+          <div className="mt-1 min-h-0 flex-1 space-y-0.5 overflow-y-auto pr-1">
+            {loadingWorkspace ? (
+              <div className="px-3 py-1 text-xs text-gray-600">Loading...</div>
+            ) : filteredChats.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-gray-600">No chats yet.</div>
+            ) : (
+              filteredChats.map((chat) => (
+                <div key={chat.id} className="group flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => { setActiveChatId(chat.id); navigateToPanel("chat"); }}
+                    className={`flex-1 min-w-0 flex flex-col rounded-md px-3 py-1.5 text-left transition-colors ${
+                      activeChatId === chat.id
+                        ? "bg-gray-800 text-gray-100"
+                        : "text-gray-500 hover:bg-gray-800 hover:text-gray-300"
+                    }`}
+                  >
+                    <span className="truncate text-sm leading-tight">{chat.title}</span>
+                    <span className="text-[11px] text-gray-600 mt-0.5">{formatDate(chat.last_message_at)}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteChat(chat)}
+                    disabled={deletingChatId === chat.id || sendingMessage}
+                    className="hidden group-hover:flex h-6 w-6 items-center justify-center rounded text-gray-600 hover:bg-gray-800 hover:text-red-400 transition-colors flex-shrink-0"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              ))
             )}
+          </div>
+        </div>
 
-            {activePanel === "project" && (
-              <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-5 sm:px-6">
-                {!activeProject ? (
-                  <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-500 shadow-sm">
-                    Select a project to edit settings and shares.
+        {/* User */}
+        <div className="border-t border-gray-800 px-3 py-3">
+          <div className="flex items-center gap-3">
+            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-semibold text-white">
+              {user ? (user.first_name[0] ?? "U").toUpperCase() : "U"}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-gray-200">
+                {user ? `${user.first_name} ${user.last_name}` : "User"}
+              </p>
+              <p className="truncate text-xs text-gray-500">{user?.email}</p>
+            </div>
+            <button
+              type="button"
+              onClick={handleSignOut}
+              title="Sign out"
+              className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded text-gray-500 hover:bg-gray-800 hover:text-gray-200 transition-colors"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      {/* ── Main content ── */}
+      <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {/* Top bar */}
+        <header className="flex items-center gap-4 border-b border-gray-200 bg-white px-6 py-3">
+          <div className="flex-1 min-w-0">
+            <h1 className="text-base font-semibold text-gray-900 truncate">
+              {activePanel === "chat" && (activeChatId ? (chats.find((c) => c.id === activeChatId)?.title ?? "Chat") : "New conversation")}
+              {activePanel === "project" && (activeProject ? activeProject.name : "Projects")}
+              {activePanel === "files" && "Files"}
+              {activePanel === "invitations" && "Invitations"}
+            </h1>
+            <p className="text-xs text-gray-500">
+              {activeProject ? `Project: ${activeProject.name}` : "All projects"}
+            </p>
+          </div>
+          {activePanel === "chat" && (
+            <Button
+              size="sm"
+              onClick={handleStartNewChat}
+              className="gap-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 text-xs"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              New chat
+            </Button>
+          )}
+        </header>
+
+        {/* ── Chat panel ── */}
+        {activePanel === "chat" && (
+          <div className="flex min-h-0 flex-1 flex-col">
+            {/* Messages */}
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+              {messages.length === 0 ? (
+                loadingChat ? (
+                  <div className="flex items-center justify-center h-full">
+                    <div className="text-sm text-gray-400 animate-pulse">Loading conversation...</div>
                   </div>
                 ) : (
-                  <div className="space-y-6">
-                    <form
-                      onSubmit={handleSaveProject}
-                      className="space-y-3 rounded-2xl border border-slate-200 bg-[linear-gradient(160deg,#ffffff,#f0f7ff)] p-4 shadow-sm"
-                    >
-                      <p className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900">
-                        <FolderOpen className="h-4 w-4 text-slate-700" />
-                        Project settings
+                  <div className="flex flex-col items-center justify-center h-full gap-4 text-center">
+                    <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-50 border border-indigo-100">
+                      <Bot className="h-8 w-8 text-indigo-400" />
+                    </div>
+                    <div>
+                      <p className="text-base font-semibold text-gray-700">Start a conversation</p>
+                      <p className="text-sm text-gray-400 mt-1">
+                        {activeProject ? `Chatting in project "${activeProject.name}"` : "Ask anything about your projects and files."}
                       </p>
+                    </div>
+                  </div>
+                )
+              ) : (
+                <div className="mx-auto max-w-3xl space-y-6">
+                  {messages.map((message) => {
+                    const isAssistant = message.role === "assistant";
+                    const isStreamingPlaceholder = isAssistant && !message.content && (message.id === STREAMING_MESSAGE_ID || message.id.startsWith(REALTIME_STREAMING_MESSAGE_PREFIX));
+                    const isCurrentUser = message.role === "user" && (message.id.startsWith("local-user-") || (user?.id !== undefined && user?.id !== null && message.sender?.id === user.id));
+                    const isOtherUser = message.role === "user" && !isCurrentUser;
 
-                      <Input
-                        value={editName}
-                        onChange={(event) => setEditName(event.target.value)}
-                        placeholder="Project name"
-                        className="rounded-xl border-slate-300 bg-white"
-                        required
-                      />
+                    let senderName = "Assistant";
+                    if (isCurrentUser) senderName = "You";
+                    else if (isOtherUser) {
+                      const full = [message.sender?.first_name, message.sender?.last_name].filter(Boolean).join(" ").trim();
+                      senderName = full || message.sender?.email || "Teammate";
+                    }
 
-                      <Textarea
-                        value={editDescription}
-                        onChange={(event) => setEditDescription(event.target.value)}
-                        placeholder="Description"
-                        className="min-h-18 rounded-xl border-slate-300 bg-white"
-                      />
+                    if (isAssistant) {
+                      return (
+                        <div key={message.id} className="flex gap-3">
+                          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-indigo-100 border border-indigo-200">
+                            <Bot className="h-4 w-4 text-indigo-600" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="mb-1.5 text-xs font-medium text-gray-400">{senderName}</p>
+                            <div className="rounded-2xl rounded-tl-sm bg-white border border-gray-200 px-4 py-3 text-sm leading-relaxed text-gray-800 shadow-sm">
+                              {isStreamingPlaceholder ? (
+                                <div className="flex gap-1 items-center h-5">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-bounce [animation-delay:0ms]" />
+                                  <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-bounce [animation-delay:150ms]" />
+                                  <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-bounce [animation-delay:300ms]" />
+                                </div>
+                              ) : (
+                                <p className="whitespace-pre-wrap">{message.content || "..."}</p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
 
-                      <Textarea
-                        value={editInstructions}
-                        onChange={(event) => setEditInstructions(event.target.value)}
-                        placeholder="Instructions for assistant"
-                        className="min-h-24 rounded-xl border-slate-300 bg-white"
-                      />
+                    return (
+                      <div key={message.id} className={`flex gap-3 ${isCurrentUser ? "flex-row-reverse" : ""}`}>
+                        <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-xs font-semibold ${isCurrentUser ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-600"}`}>
+                          {senderName[0]?.toUpperCase()}
+                        </div>
+                        <div className={`max-w-[70%] min-w-0 ${isCurrentUser ? "items-end" : "items-start"} flex flex-col`}>
+                          <p className={`mb-1.5 text-xs font-medium text-gray-400 ${isCurrentUser ? "text-right" : ""}`}>{senderName}</p>
+                          <div className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${isCurrentUser ? "bg-indigo-600 text-white rounded-tr-sm" : "bg-gray-100 text-gray-800 border border-gray-200 rounded-tl-sm"}`}>
+                            <p className="whitespace-pre-wrap">{message.content}</p>
+                          </div>
+                          <p className="mt-1 text-[11px] text-gray-400">{formatDate(message.created_at)}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {loadingChat && (
+                    <p className="text-center text-xs text-gray-400 animate-pulse">Syncing...</p>
+                  )}
+                  <div ref={messagesEndRef} />
+                </div>
+              )}
+            </div>
 
-                      <label className="flex items-center gap-2 text-sm text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={editFavorite}
-                          onChange={(event) => setEditFavorite(event.target.checked)}
-                        />
-                        Mark as favorite
-                      </label>
+            {/* Input */}
+            <div className="border-t border-gray-200 bg-white px-6 py-4">
+              <form onSubmit={handleSendMessage} className="mx-auto max-w-3xl">
+                <div className="flex items-end gap-3 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 focus-within:border-indigo-300 focus-within:bg-white focus-within:ring-4 focus-within:ring-indigo-50 transition-all">
+                  <div className="flex-1">
+                    <Textarea
+                      value={messageInput}
+                      onChange={(e) => setMessageInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); } }}
+                      placeholder="Ask anything… (Enter to send, Shift+Enter for newline)"
+                      className="min-h-[44px] max-h-48 resize-none border-0 bg-transparent p-0 text-sm text-gray-800 placeholder:text-gray-400 focus-visible:ring-0 shadow-none"
+                      rows={1}
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 pb-0.5">
+                    <button
+                      type="button"
+                      onClick={() => chatFileInputRef.current?.click()}
+                      disabled={!activeChatId || uploadingChatFile}
+                      title="Attach file"
+                      className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-200 hover:text-gray-700 disabled:opacity-40 transition-colors"
+                    >
+                      <Paperclip className="h-4 w-4" />
+                    </button>
+                    <input ref={chatFileInputRef} type="file" className="hidden" onChange={handleChatFileSelected} />
+                    <button
+                      type="submit"
+                      disabled={sendingMessage || loadingWorkspace || !messageInput.trim()}
+                      className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <SendHorizontal className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+                {uploadingChatFile && (
+                  <p className="mt-2 text-xs text-indigo-500 animate-pulse">Uploading file...</p>
+                )}
+              </form>
+            </div>
+          </div>
+        )}
 
-                      <label className="flex items-center gap-2 text-sm text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={editArchived}
-                          onChange={(event) => setEditArchived(event.target.checked)}
-                        />
-                        Archive project
-                      </label>
+        {/* ── Projects panel ── */}
+        {activePanel === "project" && (
+          <div className="flex-1 overflow-y-auto px-6 py-6">
+            <div className="mx-auto max-w-3xl space-y-6">
+              {/* New project form */}
+              {(showNewProject || projects.length === 0) && (
+                <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                      <Plus className="h-4 w-4 text-indigo-600" />
+                      New project
+                    </h2>
+                    {projects.length > 0 && (
+                      <button type="button" onClick={() => setShowNewProject(false)} className="text-gray-400 hover:text-gray-700">
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                  <form onSubmit={handleCreateProject} className="space-y-3">
+                    <Input
+                      value={projectNameInput}
+                      onChange={(e) => setProjectNameInput(e.target.value)}
+                      placeholder="Project name"
+                      className="rounded-xl border-gray-200 bg-gray-50 focus:bg-white text-sm"
+                      required
+                    />
+                    <Textarea
+                      value={projectDescriptionInput}
+                      onChange={(e) => setProjectDescriptionInput(e.target.value)}
+                      placeholder="Description (optional)"
+                      className="rounded-xl border-gray-200 bg-gray-50 focus:bg-white text-sm min-h-[72px]"
+                    />
+                    <Button disabled={creatingProject} className="w-full rounded-xl bg-indigo-600 text-white hover:bg-indigo-500 text-sm">
+                      {creatingProject ? "Creating..." : "Create project"}
+                    </Button>
+                  </form>
+                </div>
+              )}
 
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          type="submit"
-                          className="rounded-xl bg-blue-600 text-white hover:bg-blue-500"
-                          disabled={savingProject}
-                        >
-                          {savingProject ? "Saving..." : "Save Project"}
+              {/* Project settings */}
+              {!activeProject ? (
+                <div className="rounded-2xl border border-dashed border-gray-200 bg-white p-10 text-center">
+                  <FolderOpen className="h-10 w-10 text-gray-300 mx-auto mb-3" />
+                  <p className="text-sm font-medium text-gray-500">Select a project from the sidebar to edit it</p>
+                  {!showNewProject && (
+                    <button
+                      type="button"
+                      onClick={() => setShowNewProject(true)}
+                      className="mt-4 inline-flex items-center gap-2 rounded-lg bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-100 transition-colors"
+                    >
+                      <Plus className="h-4 w-4" /> New project
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Settings card */}
+                  <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+                    <h2 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                      <Settings className="h-4 w-4 text-gray-500" /> Project settings
+                    </h2>
+                    <form onSubmit={handleSaveProject} className="space-y-3">
+                      <div>
+                        <label className="text-xs font-medium text-gray-600 mb-1 block">Name</label>
+                        <Input value={editName} onChange={(e) => setEditName(e.target.value)} className="rounded-xl border-gray-200 text-sm" required />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-gray-600 mb-1 block">Description</label>
+                        <Textarea value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder="No description" className="rounded-xl border-gray-200 text-sm min-h-[72px]" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-gray-600 mb-1 block">Instructions for AI</label>
+                        <Textarea value={editInstructions} onChange={(e) => setEditInstructions(e.target.value)} placeholder="Custom instructions..." className="rounded-xl border-gray-200 text-sm min-h-[100px]" />
+                      </div>
+                      <div className="flex items-center gap-4 pt-1">
+                        <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+                          <input type="checkbox" checked={editArchived} onChange={(e) => setEditArchived(e.target.checked)} className="rounded border-gray-300" />
+                          Archived
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+                          <input type="checkbox" checked={editFavorite} onChange={(e) => setEditFavorite(e.target.checked)} className="rounded border-gray-300" />
+                          Favorite
+                        </label>
+                      </div>
+                      <div className="flex gap-2 pt-1">
+                        <Button disabled={savingProject} className="rounded-xl bg-indigo-600 text-white hover:bg-indigo-500 text-sm">
+                          {savingProject ? "Saving..." : "Save changes"}
                         </Button>
-
                         {isProjectOwner && (
-                          <Button
-                            type="button"
-                            variant="destructive"
-                            onClick={handleDeleteProject}
-                            disabled={deletingProjectId === activeProject.id}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                            {deletingProjectId === activeProject.id
-                              ? "Deleting..."
-                              : "Delete Project"}
+                          <Button type="button" variant="outline" onClick={() => void handleDeleteProject()} disabled={!!deletingProjectId} className="rounded-xl border-red-200 text-red-600 hover:bg-red-50 text-sm">
+                            <Trash2 className="h-3.5 w-3.5" />
+                            {deletingProjectId ? "Deleting..." : "Delete"}
                           </Button>
                         )}
                       </div>
                     </form>
-
-                    <section className="space-y-3 rounded-2xl border border-slate-200 bg-[linear-gradient(160deg,#ffffff,#f0f7ff)] p-4 shadow-sm">
-                      <p className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900">
-                        <Mail className="h-4 w-4 text-slate-700" />
-                        Sharing
-                      </p>
-
-                      {isProjectOwner ? (
-                        <form onSubmit={handleAddShare} className="grid gap-2 sm:grid-cols-[1fr_180px_auto]">
-                          <Input
-                            type="email"
-                            placeholder="teammate@example.com"
-                            value={shareEmail}
-                            onChange={(event) => setShareEmail(event.target.value)}
-                            className="rounded-xl border-slate-300 bg-white"
-                            required
-                          />
-
-                          <select
-                            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
-                            value={sharePermission}
-                            onChange={(event) =>
-                              setSharePermission(event.target.value as SharePermission)
-                            }
-                          >
-                            <option value="viewer">Viewer</option>
-                            <option value="editor">Editor</option>
-                            <option value="admin">Admin</option>
-                          </select>
-
-                          <Button
-                            type="submit"
-                            className="rounded-xl bg-blue-600 text-white hover:bg-blue-500"
-                            disabled={addingShare}
-                          >
-                            {addingShare ? "Sharing..." : "Share"}
-                          </Button>
-                        </form>
-                      ) : (
-                        <p className="text-sm text-slate-500">
-                          Only owners can manage shares.
-                        </p>
-                      )}
-
-                      <div className="space-y-2">
-                        {(activeProject.shares ?? []).length === 0 ? (
-                          <p className="text-sm text-slate-500">No shared users.</p>
-                        ) : (
-                          (activeProject.shares ?? []).map((share) => (
-                            <div
-                              key={share.id}
-                              className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
-                            >
-                              <div>
-                                <p className="text-sm font-medium text-slate-900">
-                                  {share.user_email}
-                                </p>
-                                <p className="text-xs text-slate-500">
-                                  {share.is_pending
-                                    ? "Invitation pending"
-                                    : "Accepted"}
-                                </p>
-                              </div>
-
-                              <div className="flex items-center gap-2">
-                                <select
-                                  className="rounded-xl border border-slate-300 bg-white px-2 py-1 text-sm"
-                                  value={share.permission}
-                                  disabled={!isProjectOwner || updatingShareId === share.id}
-                                  onChange={(event) =>
-                                    void handleUpdateSharePermission(
-                                      share.id,
-                                      event.target.value as SharePermission,
-                                    )
-                                  }
-                                >
-                                  <option value="viewer">Viewer</option>
-                                  <option value="editor">Editor</option>
-                                  <option value="admin">Admin</option>
-                                </select>
-
-                                {isProjectOwner && (
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    disabled={removingShareId === share.id}
-                                    onClick={() => void handleRemoveShare(share.id)}
-                                  >
-                                    {removingShareId === share.id ? "Removing..." : "Remove"}
-                                  </Button>
-                                )}
-                              </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </section>
                   </div>
-                )}
-              </div>
-            )}
 
-            {activePanel === "files" && (
-              <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-5 sm:px-6">
-                {!activeProject ? (
-                  <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-500 shadow-sm">
-                    Select a project to manage files.
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button
+                  {/* Files card */}
+                  <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+                    <div className="flex items-center justify-between mb-4">
+                      <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-gray-500" /> Files
+                      </h2>
+                      <button
                         type="button"
                         onClick={() => projectFileInputRef.current?.click()}
-                        className="rounded-xl bg-blue-600 text-white hover:bg-blue-500"
                         disabled={uploadingProjectFile}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-100 disabled:opacity-50 transition-colors"
                       >
-                        <Upload className="h-4 w-4" />
-                        {uploadingProjectFile ? "Uploading..." : "Upload Project File"}
-                      </Button>
-                      <input
-                        ref={projectFileInputRef}
-                        type="file"
-                        className="hidden"
-                        onChange={handleProjectFileSelected}
-                      />
-                      <p className="text-xs text-slate-500">
-                        Files are tied to project: {activeProject.name}
-                      </p>
+                        <Upload className="h-3.5 w-3.5" />
+                        {uploadingProjectFile ? "Uploading..." : "Upload"}
+                      </button>
+                      <input ref={projectFileInputRef} type="file" className="hidden" onChange={handleProjectFileSelected} />
                     </div>
-
                     {loadingFiles ? (
-                      <p className="text-sm text-slate-500">Loading files...</p>
+                      <p className="text-sm text-gray-400 animate-pulse">Loading files...</p>
                     ) : projectFiles.length === 0 ? (
-                      <p className="text-sm text-slate-500">No files uploaded.</p>
+                      <div className="rounded-xl border border-dashed border-gray-200 py-8 text-center">
+                        <FileText className="h-8 w-8 text-gray-300 mx-auto mb-2" />
+                        <p className="text-xs text-gray-400">No files uploaded yet</p>
+                      </div>
                     ) : (
                       <div className="space-y-2">
                         {projectFiles.map((file) => (
-                          <article
-                            key={file.id}
-                            className="rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm"
-                          >
-                            <div className="flex flex-wrap items-start justify-between gap-2">
-                              <div>
-                                <p className="text-sm font-medium text-slate-900">
-                                  {file.filename}
-                                </p>
-                                <p className="text-xs text-slate-500">
-                                  {formatBytes(file.file_size)} · {file.file_type} · {file.processing_status}
-                                </p>
-                                <p className="text-xs text-slate-500">
-                                  Uploaded {formatDate(file.created_at)}
-                                </p>
-                              </div>
-
-                              <div className="flex items-center gap-2">
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  disabled={confirmingFileId === file.id}
-                                  onClick={() => void handleConfirmFile(file.id)}
-                                >
-                                  {confirmingFileId === file.id ? "Confirming..." : "Confirm"}
-                                </Button>
-
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="destructive"
-                                  disabled={deletingFileId === file.id}
-                                  onClick={() => void handleDeleteFile(file.id)}
-                                >
-                                  {deletingFileId === file.id ? "Deleting..." : "Delete"}
-                                </Button>
-                              </div>
+                          <div key={file.id} className="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
+                            <FileText className="h-4 w-4 flex-shrink-0 text-gray-400" />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm text-gray-800">{file.filename}</p>
+                              <p className="text-xs text-gray-400">{formatBytes(file.file_size)} · {formatDate(file.created_at)}</p>
                             </div>
-                          </article>
+                            <button
+                              type="button"
+                              onClick={() => void handleDeleteFile(file.id)}
+                              disabled={deletingFileId === file.id}
+                              className="text-gray-400 hover:text-red-500 transition-colors"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
                         ))}
                       </div>
                     )}
+                  </div>
+
+                  {/* Sharing card */}
+                  {isProjectOwner && (
+                    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+                      <h2 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                        <UserRound className="h-4 w-4 text-gray-500" /> Sharing
+                      </h2>
+                      <form onSubmit={handleAddShare} className="flex gap-2 mb-4">
+                        <Input
+                          type="email"
+                          value={shareEmail}
+                          onChange={(e) => setShareEmail(e.target.value)}
+                          placeholder="teammate@example.com"
+                          className="flex-1 rounded-xl border-gray-200 text-sm"
+                          required
+                        />
+                        <select
+                          value={sharePermission}
+                          onChange={(e) => setSharePermission(e.target.value as SharePermission)}
+                          className="rounded-xl border border-gray-200 bg-white px-2 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                        >
+                          <option value="viewer">Viewer</option>
+                          <option value="editor">Editor</option>
+                        </select>
+                        <Button disabled={addingShare} className="rounded-xl bg-indigo-600 text-white hover:bg-indigo-500 text-sm whitespace-nowrap">
+                          {addingShare ? "Sending..." : "Invite"}
+                        </Button>
+                      </form>
+                      {activeProject.shares && activeProject.shares.length > 0 && (
+                        <div className="space-y-2">
+                          {activeProject.shares.map((share) => (
+                            <div key={share.id} className="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
+                              <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-gray-200 text-xs font-semibold text-gray-600">
+                                {share.user_email?.[0]?.toUpperCase() ?? "?"}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-sm text-gray-800">{share.user_email}</p>
+                              </div>
+                              <select
+                                value={share.permission}
+                                onChange={(e) => void handleUpdateSharePermission(share.id, e.target.value as SharePermission)}
+                                disabled={updatingShareId === share.id}
+                                className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                              >
+                                <option value="viewer">Viewer</option>
+                                <option value="editor">Editor</option>
+                              </select>
+                              <button
+                                type="button"
+                                onClick={() => void handleRemoveShare(share.id)}
+                                disabled={removingShareId === share.id}
+                                className="text-gray-400 hover:text-red-500 transition-colors"
+                              >
+                                <X className="h-4 w-4" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── Files panel ── */}
+        {activePanel === "files" && (
+          <div className="flex-1 overflow-y-auto px-6 py-6">
+            <div className="mx-auto max-w-3xl">
+              {!activeProject ? (
+                <div className="rounded-2xl border border-dashed border-gray-200 bg-white p-10 text-center">
+                  <FolderOpen className="h-10 w-10 text-gray-300 mx-auto mb-3" />
+                  <p className="text-sm font-medium text-gray-500">Select a project from the sidebar to view its files</p>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-sm font-semibold text-gray-900">{activeProject.name} — Files</h2>
+                    <button
+                      type="button"
+                      onClick={() => projectFileInputRef.current?.click()}
+                      disabled={uploadingProjectFile}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-100 disabled:opacity-50 transition-colors"
+                    >
+                      <Upload className="h-3.5 w-3.5" />
+                      {uploadingProjectFile ? "Uploading..." : "Upload file"}
+                    </button>
+                    <input ref={projectFileInputRef} type="file" className="hidden" onChange={handleProjectFileSelected} />
+                  </div>
+                  {loadingFiles ? (
+                    <p className="text-sm text-gray-400 animate-pulse">Loading...</p>
+                  ) : projectFiles.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-gray-200 py-12 text-center">
+                      <FileText className="h-10 w-10 text-gray-300 mx-auto mb-3" />
+                      <p className="text-sm text-gray-400">No files yet</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {projectFiles.map((file) => (
+                        <div key={file.id} className="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
+                          <FileText className="h-5 w-5 flex-shrink-0 text-indigo-400" />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium text-gray-800">{file.filename}</p>
+                            <p className="text-xs text-gray-400">{formatBytes(file.file_size)} · {formatDate(file.created_at)}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteFile(file.id)}
+                            disabled={deletingFileId === file.id}
+                            className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── Invitations panel ── */}
+        {activePanel === "invitations" && (
+          <div className="flex-1 overflow-y-auto px-6 py-6">
+            <div className="mx-auto max-w-3xl space-y-4">
+              {/* Accept by token */}
+              <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+                <h2 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                  <Mail className="h-4 w-4 text-gray-500" /> Accept an invitation
+                </h2>
+                <form onSubmit={handleAcceptInvitationToken} className="flex gap-2">
+                  <Input
+                    value={manualInvitationToken}
+                    onChange={(e) => setManualInvitationToken(e.target.value)}
+                    placeholder="Paste invitation token..."
+                    className="flex-1 rounded-xl border-gray-200 text-sm"
+                    required
+                  />
+                  <Button disabled={acceptingToken} className="rounded-xl bg-indigo-600 text-white hover:bg-indigo-500 text-sm whitespace-nowrap">
+                    {acceptingToken ? "Accepting..." : "Accept"}
+                  </Button>
+                </form>
+              </div>
+
+              {/* Pending invitations */}
+              <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-sm font-semibold text-gray-900">Pending invitations</h2>
+                  <button
+                    type="button"
+                    onClick={() => void refreshInvitations()}
+                    className="text-xs text-indigo-600 hover:text-indigo-800 transition-colors"
+                  >
+                    Refresh
+                  </button>
+                </div>
+                {loadingInvitations ? (
+                  <p className="text-sm text-gray-400 animate-pulse">Loading...</p>
+                ) : invitations.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-gray-200 py-10 text-center">
+                    <Mail className="h-8 w-8 text-gray-300 mx-auto mb-2" />
+                    <p className="text-sm text-gray-400">No pending invitations</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {invitations.map((inv) => (
+                      <div key={inv.id} className="flex items-center gap-4 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
+                        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-indigo-100 text-sm font-semibold text-indigo-700">
+                          {inv.project?.name?.[0]?.toUpperCase() ?? "P"}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-gray-800">{inv.project?.name ?? "Unknown project"}</p>
+                          <p className="text-xs text-gray-500">Invited by {inv.invited_by ?? "someone"} · {inv.permission}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setAcceptingToken(true);
+                            try {
+                              await backendApi.acceptInvitationByToken(inv.id);
+                              await Promise.all([refreshProjects(), refreshInvitations()]);
+                              toast.success("Invitation accepted.");
+                            } catch (error) {
+                              toast.error(getApiErrorMessage(error, "Failed to accept."));
+                            } finally { setAcceptingToken(false); }
+                          }}
+                          disabled={acceptingToken}
+                          className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors"
+                        >
+                          Accept
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
-            )}
-
-            {activePanel === "invitations" && (
-              <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-5 sm:px-6">
-                <div className="space-y-4">
-                  <form
-                    onSubmit={handleAcceptInvitationToken}
-                    className="rounded-2xl border border-slate-200 bg-[linear-gradient(160deg,#ffffff,#f0f7ff)] p-4 shadow-sm"
-                  >
-                    <p className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900">
-                      <Mail className="h-4 w-4 text-slate-700" />
-                      Accept invitation by token
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      Paste token from invitation email link.
-                    </p>
-                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                      <Input
-                        value={manualInvitationToken}
-                        onChange={(event) =>
-                          setManualInvitationToken(event.target.value)
-                        }
-                        placeholder="Invitation token"
-                        className="rounded-xl border-slate-300 bg-white"
-                      />
-                      <Button
-                        type="submit"
-                        className="rounded-xl bg-blue-600 text-white hover:bg-blue-500"
-                        disabled={acceptingToken}
-                      >
-                        {acceptingToken ? "Accepting..." : "Accept"}
-                      </Button>
-                    </div>
-                  </form>
-
-                  <div className="rounded-2xl border border-slate-200 bg-[linear-gradient(160deg,#ffffff,#f8f8f5)] p-4 shadow-sm">
-                    <div className="mb-3 flex items-center justify-between">
-                      <p className="text-sm font-semibold text-slate-900">
-                        Pending invitations
-                      </p>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => void refreshInvitations()}
-                        disabled={loadingInvitations}
-                      >
-                        {loadingInvitations ? "Refreshing..." : "Refresh"}
-                      </Button>
-                    </div>
-
-                    {invitations.length === 0 ? (
-                      <p className="text-sm text-slate-500">No pending invitations.</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {invitations.map((invite) => (
-                          <article
-                            key={invite.id}
-                            className="rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
-                          >
-                            <p className="text-sm font-medium text-slate-900">
-                              {invite.project.name}
-                            </p>
-                            <p className="text-xs text-slate-500">
-                              Permission: {invite.permission}
-                            </p>
-                            <p className="text-xs text-slate-500">
-                              Invited at {formatDate(invite.invited_at)}
-                            </p>
-                          </article>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-          </section>
-        </section>
-      </div>
-    </main>
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
   );
 }
