@@ -23,11 +23,13 @@ import {
   LayoutGrid,
   Leaf,
   Lightbulb,
+  Link2,
   LogOut,
   Mail,
   MessageSquare,
   MoreHorizontal,
   Paperclip,
+  Pencil,
   Plus,
   Search,
   SendHorizontal,
@@ -116,6 +118,21 @@ function formatBytes(bytes: number): string {
   const kb = bytes / 1024;
   if (kb < 1024) return kb.toFixed(1) + " KB";
   return (kb / 1024).toFixed(1) + " MB";
+}
+
+function formatRelativeDate(value: string | null): string {
+  if (!value) return "—";
+  const diffMs = Date.now() - new Date(value).getTime();
+  const secs = Math.floor(diffMs / 1000);
+  if (secs < 60) return `${secs} sec ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} hour${hours !== 1 ? "s" : ""} ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} day${days !== 1 ? "s" : ""} ago`;
+  const months = Math.floor(days / 30);
+  return `${months} month${months !== 1 ? "s" : ""} ago`;
 }
 
 function FileTypeIcon({ filename, className }: { filename: string; className?: string }) {
@@ -212,6 +229,8 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
   const [projectTab, setProjectTab] = useState<"active" | "archive">("active");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [openProjectMenuId, setOpenProjectMenuId] = useState<string | null>(null);
+  const [projectListMenuId, setProjectListMenuId] = useState<string | null>(null);
+  const [projectSearch, setProjectSearch] = useState("");
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const projectFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -261,6 +280,13 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
       ),
     [projects, projectTab],
   );
+
+  const filteredProjectsList = useMemo(() => {
+    const q = projectSearch.trim().toLowerCase();
+    return projects.filter(
+      (p) => !p.is_archived && (!q || p.name.toLowerCase().includes(q) || (p.description ?? "").toLowerCase().includes(q)),
+    );
+  }, [projects, projectSearch]);
 
   const refreshProjects = useCallback(async () => {
     const data = await backendApi.listProjects();
@@ -611,6 +637,15 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
 
   async function handleDeleteProject() {
     if (activeProject) await handleDeleteProjectById(activeProject);
+  }
+
+  async function handleToggleFavorite(project: Project) {
+    try {
+      await backendApi.updateProject(project.id, { is_favorite: !project.is_favorite });
+      await refreshProjects();
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Failed to update project."));
+    }
   }
 
   async function handleDeleteChat(chat: ChatWithMessages) {
@@ -1073,7 +1108,9 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
                           }`}
                           onClick={() => {
                             setProjectFilter(project.id);
-                            navigateToPanel("project");
+                            setActiveChatId(null);
+                            setMessages([]);
+                            navigateToPanel("chat");
                           }}
                         >
                           <FolderOpen className="h-3.5 w-3.5 flex-shrink-0 text-gray-400" />
@@ -1095,7 +1132,31 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
                           </button>
                         </div>
                         {openProjectMenuId === project.id && (
-                          <div className="absolute right-2 top-7 z-20 w-32 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+                          <div className="absolute right-2 top-7 z-20 w-36 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOpenProjectMenuId(null);
+                                void handleToggleFavorite(project);
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
+                            >
+                              <Star className={`h-3 w-3 ${project.is_favorite ? "fill-amber-400 text-amber-400" : "text-gray-400"}`} />
+                              {project.is_favorite ? "Unfavorite" : "Favorite"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOpenProjectMenuId(null);
+                                setProjectFilter(project.id);
+                                navigateToPanel("project");
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
+                            >
+                              <Pencil className="h-3 w-3 text-gray-400" />
+                              Edit details
+                            </button>
+                            <div className="my-1 h-px bg-gray-100" />
                             <button
                               type="button"
                               onClick={() => {
@@ -1394,8 +1455,8 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
             </div>
           )}
 
-          {/* ── Home state: no active chat + chat panel ── */}
-          {!showNewProject && isHomeState && (
+          {/* ── General home state (no project selected) ── */}
+          {!showNewProject && isHomeState && projectFilter === ALL_PROJECTS_FILTER && (
             <div className="flex flex-1 flex-col items-center justify-center px-8 py-10">
               <p className="mb-1 text-[11px] font-bold tracking-widest text-gray-400 uppercase">
                 F-MATE
@@ -1419,26 +1480,20 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
                         key={project.id}
                         project={project}
                         index={i}
-                        onClick={() => {
-                          setProjectFilter(project.id);
-                        }}
+                        onClick={() => { setProjectFilter(project.id); }}
                       />
                     ))}
                   </div>
                   {projects.length > 3 && (
-                    <div className="grid grid-cols-2 gap-3 px-[calc(33.33%/2-6px)]" style={{ paddingLeft: 0, paddingRight: 0 }}>
-                      <div className="grid grid-cols-2 gap-3 col-span-2" style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: "repeat(2, 1fr)", paddingLeft: "calc(33.33333% / 2 - 6px)", paddingRight: "calc(33.33333% / 2 - 6px)" }}>
-                        {projects.slice(3, 5).map((project, i) => (
-                          <AgentCard
-                            key={project.id}
-                            project={project}
-                            index={i + 3}
-                            onClick={() => {
-                              setProjectFilter(project.id);
-                            }}
-                          />
-                        ))}
-                      </div>
+                    <div className="grid grid-cols-2 gap-3" style={{ gridTemplateColumns: "repeat(2, 1fr)", paddingLeft: "calc(33.33333% / 2 - 6px)", paddingRight: "calc(33.33333% / 2 - 6px)" }}>
+                      {projects.slice(3, 5).map((project, i) => (
+                        <AgentCard
+                          key={project.id}
+                          project={project}
+                          index={i + 3}
+                          onClick={() => { setProjectFilter(project.id); }}
+                        />
+                      ))}
                     </div>
                   )}
                 </div>
@@ -1541,6 +1596,106 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
                     ))}
                   </div>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Project home state (project selected, no active chat) ── */}
+          {!showNewProject && isHomeState && projectFilter !== ALL_PROJECTS_FILTER && activeProject && (
+            <div className="flex flex-1 flex-col">
+              {/* Header: folder icon + name + description */}
+              <div className="flex-shrink-0 border-b border-gray-100 px-10 py-10">
+                <div className="flex items-center gap-3 mb-2">
+                  <FolderOpen className="h-8 w-8 text-gray-700" />
+                  <h1 className="text-2xl font-bold text-gray-900">{activeProject.name}</h1>
+                </div>
+                {activeProject.description && (
+                  <p className="ml-11 text-sm text-gray-500">{activeProject.description}</p>
+                )}
+              </div>
+
+              {/* Message input */}
+              <div className="flex-shrink-0 px-10 pt-6">
+                <form onSubmit={handleSendMessage}>
+                  <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm focus-within:border-violet-300 focus-within:ring-2 focus-within:ring-violet-50 transition-all">
+                    <Textarea
+                      value={messageInput}
+                      onChange={(e) => setMessageInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          e.currentTarget.form?.requestSubmit();
+                        }
+                      }}
+                      placeholder="Message to F-mate..."
+                      className="min-h-[40px] max-h-40 resize-none border-0 bg-transparent p-0 text-sm text-gray-800 placeholder:text-gray-400 focus-visible:ring-0 shadow-none"
+                      rows={1}
+                    />
+                  </div>
+                  <div className="mt-2 flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => chatFileInputRef.current?.click()}
+                        className="flex h-7 w-7 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 transition-colors"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </button>
+                      <button type="button" className="flex h-7 w-7 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 transition-colors">
+                        <Code2 className="h-3.5 w-3.5" />
+                      </button>
+                      <span className="flex items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-medium text-violet-700">
+                        <FolderOpen className="h-3 w-3" />
+                        {activeProject.name}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button type="button" className="flex items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50 transition-colors">
+                        <Sparkles className="h-3 w-3 text-violet-500" />
+                        F-mate 4.0
+                        <ChevronRight className="h-3 w-3 rotate-90 text-gray-400" />
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={sendingMessage || !messageInput.trim()}
+                        className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-600 text-white hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <SendHorizontal className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                  <input ref={chatFileInputRef} type="file" className="hidden" onChange={handleChatFileSelected} />
+                </form>
+              </div>
+
+              {/* Chat list for this project */}
+              <div className="flex-1 overflow-y-auto px-10 pt-6 pb-6">
+                {filteredChats.length === 0 ? (
+                  <p className="text-sm text-gray-400">No conversations in this project yet. Start one above.</p>
+                ) : (
+                  <div className="space-y-px">
+                    {filteredChats.map((chat) => (
+                      <button
+                        key={chat.id}
+                        type="button"
+                        onClick={() => setActiveChatId(chat.id)}
+                        className="flex w-full items-start justify-between rounded-xl px-4 py-3 text-left hover:bg-gray-50 transition-colors"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-gray-800">{chat.title}</p>
+                          {chat.messages.length > 0 && (
+                            <p className="mt-0.5 truncate text-xs text-gray-400">
+                              {chat.messages[chat.messages.length - 1]?.content}
+                            </p>
+                          )}
+                        </div>
+                        <span className="ml-4 flex-shrink-0 text-xs text-gray-400">
+                          {formatDate(chat.last_message_at ?? chat.updated_at)}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1773,21 +1928,169 @@ export default function WorkspacePage({ panel }: WorkspacePageProps) {
 
                 {/* Project settings */}
                 {!activeProject ? (
-                  <div className="rounded-2xl border border-dashed border-gray-200 bg-white p-10 text-center">
-                    <FolderOpen className="mx-auto mb-3 h-10 w-10 text-gray-300" />
-                    <p className="text-sm font-medium text-gray-500">
-                      Select a project from the sidebar to edit it
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => setShowNewProject(true)}
-                      className="mt-4 inline-flex items-center gap-2 rounded-lg bg-violet-50 px-4 py-2 text-sm font-medium text-violet-600 hover:bg-violet-100 transition-colors"
-                    >
-                      <Plus className="h-4 w-4" /> New project
-                    </button>
+                  <div
+                    role="button"
+                    tabIndex={-1}
+                    onClick={() => setProjectListMenuId(null)}
+                    onKeyDown={() => setProjectListMenuId(null)}
+                    className="min-h-full"
+                  >
+                    {/* Header */}
+                    <div className="mb-8 flex items-center justify-between">
+                      <h1 className="text-2xl font-bold text-gray-900">Projects</h1>
+                      <button
+                        type="button"
+                        onClick={() => setShowNewProject(true)}
+                        className="flex items-center gap-2 rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-gray-700 transition-colors"
+                      >
+                        <Plus className="h-4 w-4" /> New project
+                      </button>
+                    </div>
+
+                    {/* Search */}
+                    <div className="mb-6 flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-4 py-2.5 shadow-sm focus-within:border-violet-300 transition-colors">
+                      <Search className="h-4 w-4 flex-shrink-0 text-gray-400" />
+                      <input
+                        value={projectSearch}
+                        onChange={(e) => setProjectSearch(e.target.value)}
+                        placeholder="Search projects..."
+                        className="flex-1 bg-transparent text-sm text-gray-800 placeholder:text-gray-400 outline-none"
+                      />
+                    </div>
+
+                    {/* Grid */}
+                    {loadingWorkspace ? (
+                      <div className="flex items-center gap-2 py-8 text-sm text-gray-400 animate-pulse">
+                        <div className="h-3 w-3 rounded-full border-2 border-violet-400 border-t-transparent animate-spin" />
+                        Loading projects…
+                      </div>
+                    ) : filteredProjectsList.length === 0 ? (
+                      <div className="py-16 text-center">
+                        <FolderOpen className="mx-auto mb-3 h-10 w-10 text-gray-300" />
+                        <p className="text-sm font-medium text-gray-500">
+                          {projectSearch ? "No projects match your search" : "No projects yet"}
+                        </p>
+                        {!projectSearch && (
+                          <button
+                            type="button"
+                            onClick={() => setShowNewProject(true)}
+                            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-violet-50 px-4 py-2 text-sm font-medium text-violet-600 hover:bg-violet-100 transition-colors"
+                          >
+                            <Plus className="h-4 w-4" /> New project
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-4">
+                        {filteredProjectsList.map((project) => (
+                          <div
+                            key={project.id}
+                            className="group relative cursor-pointer rounded-xl border border-gray-200 bg-white p-5 hover:border-gray-300 hover:shadow-sm transition-all"
+                            onClick={() => {
+                              setProjectListMenuId(null);
+                              setProjectFilter(project.id);
+                              navigateToPanel("chat");
+                            }}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <h3 className="font-semibold text-gray-900 leading-snug">{project.name}</h3>
+
+                              {/* 3-dot context menu */}
+                              <div className="relative flex-shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setProjectListMenuId(
+                                      projectListMenuId === project.id ? null : project.id,
+                                    );
+                                  }}
+                                  className="flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 opacity-0 group-hover:opacity-100 hover:bg-gray-100 transition-all"
+                                >
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </button>
+                                {projectListMenuId === project.id && (
+                                  <div className="absolute right-0 top-8 z-20 w-44 rounded-xl border border-gray-200 bg-white py-1 shadow-lg">
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        void handleToggleFavorite(project);
+                                        setProjectListMenuId(null);
+                                      }}
+                                      className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                                    >
+                                      <Star className={`h-4 w-4 ${project.is_favorite ? "fill-amber-400 text-amber-400" : "text-gray-400"}`} />
+                                      {project.is_favorite ? "Unfavorite" : "Favorite"}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setProjectFilter(project.id);
+                                        setProjectListMenuId(null);
+                                      }}
+                                      className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                                    >
+                                      <Pencil className="h-4 w-4 text-gray-400" />
+                                      Edit details
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        void navigator.clipboard.writeText(window.location.origin + "/projects/" + project.id);
+                                        toast.success("Link copied");
+                                        setProjectListMenuId(null);
+                                      }}
+                                      className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                                    >
+                                      <Link2 className="h-4 w-4 text-gray-400" />
+                                      Copy link
+                                    </button>
+                                    <div className="my-1 h-px bg-gray-100" />
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        void handleDeleteProjectById(project);
+                                        setProjectListMenuId(null);
+                                      }}
+                                      className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                      Delete
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            {project.description ? (
+                              <p className="mt-2 text-sm text-gray-500 line-clamp-2 leading-relaxed">
+                                {project.description}
+                              </p>
+                            ) : (
+                              <p className="mt-2 text-sm text-gray-300 italic">No description</p>
+                            )}
+                            <p className="mt-4 text-xs text-gray-400">
+                              Last updated {formatRelativeDate(project.updated_at)}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-4">
+                    {/* Back to projects */}
+                    <button
+                      type="button"
+                      onClick={() => setProjectFilter(ALL_PROJECTS_FILTER)}
+                      className="mb-2 flex items-center gap-1.5 text-sm text-gray-500 hover:text-violet-600 transition-colors"
+                    >
+                      <ChevronLeft className="h-4 w-4" /> Back to projects
+                    </button>
+
                     {/* Settings card */}
                     <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
                       <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-gray-900">
