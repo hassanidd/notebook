@@ -98,6 +98,29 @@ class BackendApi {
   }
 
   private setupInterceptors() {
+    this.api.interceptors.request.use((config) => {
+      const accessToken = this.getStoredAccessToken();
+      if (!accessToken) {
+        return config;
+      }
+
+      const bearerValue = `Bearer ${accessToken}`;
+      if (config.headers && typeof (config.headers as { set?: unknown }).set === "function") {
+        (
+          config.headers as {
+            set: (name: string, value: string) => void;
+          }
+        ).set("Authorization", bearerValue);
+      } else {
+        config.headers = {
+          ...(config.headers as Record<string, string> | undefined),
+          Authorization: bearerValue,
+        };
+      }
+
+      return config;
+    });
+
     this.api.interceptors.response.use(
       (response) => response,
       async (error: AxiosError) => {
@@ -231,7 +254,7 @@ class BackendApi {
   }
 
   async listProjects(): Promise<Project[]> {
-    const response = await this.api.get<Project[]>("/projects", {
+    const response = await this.api.get<Project[]>("/projects/", {
       params: {
         include_shared: true,
         include_archived: false,
@@ -254,7 +277,7 @@ class BackendApi {
   }
 
   async createProject(input: ProjectCreateInput): Promise<Project> {
-    const response = await this.api.post<Project>("/projects", {
+    const response = await this.api.post<Project>("/projects/", {
       name: input.name,
       description: input.description ?? null,
       instructions: input.instructions ?? null,
@@ -385,7 +408,7 @@ class BackendApi {
   }
 
   async listChats(): Promise<ChatWithMessages[]> {
-    const response = await this.api.get<ChatWithMessages[]>("/chats", {
+    const response = await this.api.get<ChatWithMessages[]>("/chats/", {
       params: {
         include_messages: false,
       },
